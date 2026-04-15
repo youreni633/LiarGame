@@ -1,21 +1,67 @@
-```txt
-npm install
-npm run dev
-```
+# 개콘 라이어 게임
 
-```txt
-npm run deploy
-```
+## 프로젝트 개요
+- **이름**: 개콘 라이어 게임
+- **목적**: 최대 10명이 한 세션에서 실시간으로 즐기는 채팅 기반 라이어 게임
+- **기술 스택**: Hono + TypeScript + Cloudflare Workers
 
-[For generating/synchronizing types based on your Worker configuration run](https://developers.cloudflare.com/workers/wrangler/commands/#types):
+## 게임 규칙
 
-```txt
-npm run cf-typegen
-```
+### 기본 흐름
+1. **로비** - 닉네임을 만들고 게임방에 입장
+2. **대기실** - 모든 플레이어가 준비 완료하면 방장이 게임 시작
+3. **제시어 확인** - 각자 카드를 터치하여 제시어 확인 (라이어는 다른 단어를 받음)
+4. **1차 발언** - 랜덤 순서로 제시어에 대한 생각을 발언
+5. **자유 토론** - 3분간 채팅으로 자유 토론
+6. **추가 토론 투표** - 과반수 찬성시 2차 발언 진행
+7. **최종 투표** - 라이어를 지목
+8. **라이어 추측** - 지목당한 라이어가 정답 제시어를 맞추면 라이어 승리!
 
-Pass the `CloudflareBindings` as generics when instantiation `Hono`:
+### 승리 조건
+- **시민 승리**: 라이어를 지목하고, 라이어가 제시어를 못 맞춤
+- **라이어 승리**: 투표에서 지목 안 됨 OR 지목됐지만 제시어를 맞춤
 
-```ts
-// src/index.ts
-const app = new Hono<{ Bindings: CloudflareBindings }>()
-```
+## 기능
+
+### 완료된 기능
+- [x] 닉네임 기반 입장 (회원가입 불필요)
+- [x] 게임방 생성 및 참가
+- [x] 7가지 카테고리 (음식, 동물, 장소, 직업, 영화/드라마, 스포츠, 가전제품)
+- [x] 실시간 상태 동기화 (1초 폴링)
+- [x] 랜덤 발언 순서
+- [x] 자유 토론 타이머 (3분)
+- [x] 추가 토론 투표 시스템
+- [x] 최종 라이어 투표
+- [x] 라이어 제시어 맞추기
+- [x] 게임 결과 (투표 결과 상세)
+- [x] 새 게임 시작 (방 유지)
+- [x] 방장 위임 (방장 퇴장시)
+- [x] 모바일 반응형 디자인
+- [x] 실시간 채팅
+
+## API 엔드포인트
+
+| Method | Path | 설명 |
+|--------|------|------|
+| GET | `/` | 메인 페이지 (SPA) |
+| GET | `/api/rooms` | 방 목록 조회 |
+| POST | `/api/rooms` | 방 생성 |
+| POST | `/api/rooms/:id/join` | 방 참가 |
+| POST | `/api/rooms/:id/leave` | 방 퇴장 |
+| POST | `/api/rooms/:id/ready` | 준비 토글 |
+| POST | `/api/rooms/:id/start` | 게임 시작 (방장) |
+| POST | `/api/rooms/:id/confirm-word` | 제시어 확인 완료 |
+| POST | `/api/rooms/:id/speak` | 발언 제출 |
+| POST | `/api/rooms/:id/chat` | 채팅 전송 |
+| POST | `/api/rooms/:id/end-free-chat` | 자유 토론 종료 (방장) |
+| POST | `/api/rooms/:id/vote-extend` | 추가 토론 투표 |
+| POST | `/api/rooms/:id/vote` | 최종 투표 |
+| POST | `/api/rooms/:id/liar-guess` | 라이어 제시어 추측 |
+| POST | `/api/rooms/:id/new-game` | 새 게임 (방장) |
+| POST | `/api/rooms/:id/category` | 카테고리 변경 (방장) |
+| GET | `/api/rooms/:id/state` | 방 상태 폴링 |
+
+## 배포
+- **플랫폼**: Cloudflare Pages
+- **상태**: ✅ 개발 완료
+- **최종 업데이트**: 2026-04-15
