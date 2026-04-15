@@ -1697,19 +1697,167 @@ input::placeholder { color: var(--slate-400); }
 .av-8 { background: #f97316; }
 .av-9 { background: #06b6d4; }
 
-/* Responsive */
+/* ===== MOBILE ACTION BAR (floating bottom bar) ===== */
+.mobile-action-bar {
+  display: none;
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  padding: 10px 16px;
+  padding-bottom: max(10px, env(safe-area-inset-bottom));
+  background: white;
+  border-top: 1px solid var(--slate-200);
+  box-shadow: 0 -4px 12px rgba(0,0,0,0.08);
+  z-index: 100;
+}
+
+/* ===== MOBILE PLAYER TOGGLE ===== */
+.mobile-player-toggle {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: white;
+  border-bottom: 1px solid var(--slate-200);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--slate-600);
+  -webkit-tap-highlight-color: transparent;
+}
+.mobile-player-toggle i.toggle-arrow { transition: transform 0.2s; }
+.mobile-player-toggle.collapsed i.toggle-arrow { transform: rotate(-90deg); }
+
+/* ===== MOBILE CHAT TOGGLE ===== */
+.mobile-chat-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: var(--slate-50);
+  border-top: 1px solid var(--slate-200);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--slate-500);
+  -webkit-tap-highlight-color: transparent;
+}
+.mobile-chat-toggle i { transition: transform 0.2s; }
+.mobile-chat-toggle.open i { transform: rotate(180deg); }
+
+/* ===== RESPONSIVE ===== */
 @media (max-width: 768px) {
+  #game-screen { height: 100vh; height: 100dvh; }
+
+  .game-header { padding: 8px 12px; }
+  .game-room-title { font-size: 14px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .game-phase-badge { font-size: 10px; padding: 2px 6px; }
+
   .game-body { flex-direction: column; }
+
+  /* Sidebar becomes collapsible */
   .game-sidebar {
     width: 100%;
-    max-height: 140px;
     border-right: none;
-    border-bottom: 1px solid var(--slate-200);
+    flex-shrink: 0;
+    overflow: hidden;
   }
-  .player-list { display: flex; overflow-x: auto; padding: 8px; gap: 4px; }
-  .player-item { min-width: 120px; flex-shrink: 0; margin-bottom: 0; }
+  .game-sidebar .sidebar-header { display: none; }
+  .game-sidebar .player-list {
+    display: flex;
+    overflow-x: auto;
+    padding: 6px 12px;
+    gap: 4px;
+    max-height: 200px;
+    transition: max-height 0.3s ease, padding 0.3s ease, opacity 0.3s ease;
+  }
+  .game-sidebar .player-list.collapsed {
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .player-item {
+    min-width: 110px;
+    flex-shrink: 0;
+    margin-bottom: 0;
+    padding: 6px 8px;
+    gap: 6px;
+  }
+  .player-avatar { width: 28px; height: 28px; font-size: 12px; }
+  .player-nick { font-size: 12px; }
+  .player-status { font-size: 10px; padding: 1px 6px; }
+
+  /* Hide desktop sidebar footer - we use mobile-action-bar instead */
   .sidebar-footer { display: none; }
-  .chat-section { height: 180px; }
+
+  /* Show mobile-only elements */
+  .mobile-action-bar { display: block; }
+  .mobile-player-toggle { display: flex; }
+  .mobile-chat-toggle { display: flex; }
+
+  /* Main content area fills remaining space */
+  .game-main { flex: 1; min-height: 0; }
+  .game-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+    padding-bottom: 70px; /* space for mobile action bar */
+  }
+
+  /* Chat section - collapsible */
+  .chat-section {
+    height: auto;
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+    flex-shrink: 0;
+  }
+  .chat-section.open {
+    max-height: 200px;
+  }
+  .chat-messages { max-height: 130px; }
+  .chat-input-area { padding: 8px 12px; }
+  .chat-input-area input { padding: 8px 10px; font-size: 13px; }
+  .chat-input-area button { padding: 8px 12px; font-size: 12px; }
+
+  /* Content adjustments */
+  .waiting-area { margin: 8px auto; }
+  .waiting-info { padding: 20px; margin-bottom: 12px; }
+  .waiting-info h3 { font-size: 16px; }
+  .word-reveal-card { margin: 16px auto; }
+  .word-card { padding: 24px 20px; }
+  .word-card-word { font-size: 28px; }
+  .word-card-hidden { font-size: 36px; }
+  .speaking-area { padding: 0; }
+  .current-speaker-card { padding: 16px; }
+  .speaker-name { font-size: 18px; }
+  .speak-input-area { padding: 12px; }
+  .speak-input-area textarea { height: 70px; font-size: 14px; }
+  .speaking-dot { width: 26px; height: 26px; font-size: 11px; }
+  .vote-area { padding: 0; }
+  .vote-option { padding: 10px 12px; }
+  .vote-option .player-avatar { width: 32px; height: 32px; font-size: 13px; }
+  .vote-option .vote-nick { font-size: 14px; }
+  .result-card { padding: 24px 16px; margin: 8px auto; }
+  .result-icon { font-size: 40px; margin-bottom: 10px; }
+  .result-title { font-size: 20px; }
+  .result-word-box { padding: 10px 16px; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  .result-word-value { font-size: 17px; }
+  .extend-vote-area { margin: 16px auto; }
+  .extend-btns { flex-direction: column; gap: 8px; }
+  .extend-btn { min-width: auto; padding: 14px 24px; }
+  .guess-area { margin: 16px auto; }
+  .guess-input-area { padding: 20px; }
+  .category-chip { padding: 6px 12px; font-size: 12px; }
+
+  /* Lobby */
+  .logo-section { margin-bottom: 24px; }
+  .logo-icon { width: 60px; height: 60px; font-size: 28px; }
+  .logo-title { font-size: 26px; }
+  .logo-subtitle { font-size: 13px; }
+  .card { padding: 20px; }
 }
 
 /* Overlay / Modal */
@@ -1876,6 +2024,11 @@ input::placeholder { color: var(--slate-400); }
         <span>플레이어</span>
         <span id="player-count">0/6</span>
       </div>
+      <!-- Mobile: collapsible player toggle -->
+      <div class="mobile-player-toggle" id="mobile-player-toggle" onclick="togglePlayerList()">
+        <span><i class="fas fa-users" style="margin-right:6px"></i> 플레이어 <span id="mobile-player-count">0/6</span></span>
+        <i class="fas fa-chevron-down toggle-arrow"></i>
+      </div>
       <div class="player-list" id="player-list"></div>
       <div class="sidebar-footer" id="sidebar-footer"></div>
     </aside>
@@ -1883,6 +2036,11 @@ input::placeholder { color: var(--slate-400); }
     <div class="game-main">
       <div class="game-content" id="game-content">
         <!-- Dynamic content goes here -->
+      </div>
+      <!-- Mobile: chat toggle bar -->
+      <div class="mobile-chat-toggle" id="mobile-chat-toggle" onclick="toggleChat()">
+        <i class="fas fa-chevron-up"></i>
+        <span>채팅</span>
       </div>
       <div class="chat-section" id="chat-section">
         <div class="chat-messages" id="chat-messages"></div>
@@ -1893,6 +2051,9 @@ input::placeholder { color: var(--slate-400); }
       </div>
     </div>
   </div>
+
+  <!-- Mobile: fixed bottom action bar -->
+  <div class="mobile-action-bar" id="mobile-action-bar"></div>
 </div>
 
 <!-- ===== MODAL ===== -->
@@ -2065,6 +2226,18 @@ function enterGameScreen() {
   showScreen('game-screen');
   state.version = 0;
   state.wordRevealed = false;
+  // On mobile, start with player list collapsed for more space
+  if (window.innerWidth <= 768) {
+    const list = $('player-list');
+    const toggle = $('mobile-player-toggle');
+    if (list) list.classList.add('collapsed');
+    if (toggle) toggle.classList.add('collapsed');
+    // Close chat by default
+    const chat = $('chat-section');
+    if (chat) chat.classList.remove('open');
+    const chatToggle = $('mobile-chat-toggle');
+    if (chatToggle) chatToggle.classList.remove('open');
+  }
   startPolling();
 }
 
@@ -2188,14 +2361,17 @@ function renderPlayers(players, room) {
 
 function renderSidebarFooter(room, players) {
   const el = $('sidebar-footer');
+  const mobileEl = $('mobile-action-bar');
   const isHost = room.hostId === state.playerId;
   const me = players.find(p => p.id === state.playerId);
+
+  let btnHtml = '';
 
   if (room.phase === 'waiting') {
     if (isHost) {
       const allReady = players.every(p => p.isHost || p.ready);
       const canStart = allReady && players.length >= 3;
-      el.innerHTML = \`
+      btnHtml = \`
         <button class="btn btn-success btn-block" \${canStart ? '' : 'disabled'} onclick="startGame()">
           <i class="fas fa-play"></i> 게임 시작
         </button>
@@ -2203,21 +2379,28 @@ function renderSidebarFooter(room, players) {
     } else {
       const readyText = me?.ready ? '준비 취소' : '준비 완료';
       const readyClass = me?.ready ? 'btn-secondary' : 'btn-primary';
-      el.innerHTML = \`
+      btnHtml = \`
         <button class="btn \${readyClass} btn-block" onclick="toggleReady()">
           <i class="fas fa-check"></i> \${readyText}
         </button>
       \`;
     }
   } else if (room.phase === 'result' && isHost) {
-    el.innerHTML = \`
+    btnHtml = \`
       <button class="btn btn-primary btn-block" onclick="newGame()">
         <i class="fas fa-redo"></i> 새 게임
       </button>
     \`;
-  } else {
-    el.innerHTML = '';
   }
+
+  // Desktop sidebar footer
+  el.innerHTML = btnHtml;
+  // Mobile floating action bar
+  if (mobileEl) mobileEl.innerHTML = btnHtml;
+
+  // Update mobile player count
+  const mpc = $('mobile-player-count');
+  if (mpc) mpc.textContent = \`\${players.length}/\${room.maxPlayers}\`;
 }
 
 function renderMainContent(room, players, myWord, isLiar, myVote, myExtendVote, categories) {
@@ -2676,6 +2859,25 @@ async function changeCategory(cat) {
   try {
     await api(\`/api/rooms/\${state.roomId}/category\`, 'POST', { playerId: state.playerId, category: cat });
   } catch(e) {}
+}
+
+// ===== MOBILE TOGGLES =====
+function togglePlayerList() {
+  const list = $('player-list');
+  const toggle = $('mobile-player-toggle');
+  list.classList.toggle('collapsed');
+  toggle.classList.toggle('collapsed');
+}
+
+function toggleChat() {
+  const chat = $('chat-section');
+  const toggle = $('mobile-chat-toggle');
+  chat.classList.toggle('open');
+  toggle.classList.toggle('open');
+  if (chat.classList.contains('open')) {
+    const msgs = $('chat-messages');
+    msgs.scrollTop = msgs.scrollHeight;
+  }
 }
 
 // ===== INIT =====
