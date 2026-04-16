@@ -1,3 +1,6 @@
+import { serve } from '@hono/node-server'
+import { serveStatic } from '@hono/node-server/serve-static'
+import { fileURLToPath } from 'node:url'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 
@@ -127,6 +130,13 @@ function shuffleArray<T>(array: T[]): T[] {
 // ============================================================
 const app = new Hono()
 app.use('/api/*', cors())
+
+// Static assets for Azure App Service / Node.js runtime
+const publicRoot = fileURLToPath(new URL('../public', import.meta.url))
+app.use('/static/*', serveStatic({ root: publicRoot }))
+
+// Lightweight health endpoint for warm-up / availability checks
+app.get('/health', (c) => c.json({ ok: true, timestamp: Date.now() }))
 
 // --- Room List ---
 app.get('/api/rooms', (c) => {
@@ -3193,3 +3203,11 @@ setInterval(loadRooms, 5000);
 }
 
 export default app
+
+const port = Number(process.env.PORT) || 3000
+serve({
+  fetch: app.fetch,
+  port,
+})
+
+console.log(`LiarGame server is running on port ${port}`)
