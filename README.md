@@ -65,6 +65,6 @@
 | GET | `/api/rooms/:id/state` | 방 상태 폴링 |
 
 ## 배포
-- **플랫폼**: Cloudflare Pages
+- **플랫폼**: Azure Cloud WebApp환경으로 컨버젼
 - **상태**: ✅ 개발 완료
 - **최종 업데이트**: 2026-04-16
