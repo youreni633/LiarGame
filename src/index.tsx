@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 
 // ============================================================
-// 개콘 라이어 게임 - In-Memory Game State (Edge Worker)
+// 시멈비 라이어게임 - In-Memory Game State (Edge Worker)
 // ============================================================
 
 type Player = {
@@ -876,7 +876,7 @@ function getMainHTML(): string {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>개콘 라이어 게임</title>
+<title>시멈비 라이어게임</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -1456,6 +1456,123 @@ input::placeholder { color: var(--slate-400); }
   display: flex;
   flex-direction: column;
   height: 220px;
+  position: relative;
+}
+
+/* Desktop Drag Resizer */
+.chat-resize-handle {
+  position: absolute;
+  top: -5px; left: 0; right: 0;
+  height: 10px;
+  cursor: ns-resize;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.chat-resize-handle::after {
+  content: '';
+  width: 40px;
+  height: 4px;
+  background: var(--slate-300);
+  border-radius: 2px;
+  transition: background 0.2s;
+}
+.chat-resize-handle:hover::after,
+.chat-resize-handle.dragging::after {
+  background: var(--blue-400);
+}
+
+/* Speaking Summary Panel (shown in vote/discussion phases) */
+.speaking-summary {
+  background: var(--slate-50);
+  border-bottom: 1px solid var(--slate-200);
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 10px 16px;
+}
+.speaking-summary-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--slate-500);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.speaking-summary-item {
+  background: white;
+  border-left: 3px solid var(--blue-400);
+  padding: 8px 12px;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  margin-bottom: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.speaking-summary-item .summary-nick {
+  font-weight: 700;
+  color: var(--blue-600);
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+.speaking-summary-item .summary-text {
+  color: var(--slate-700);
+  word-break: break-word;
+}
+
+/* Mobile Tab Switcher for game content / chat */
+.mobile-view-tabs {
+  display: none;
+  position: fixed;
+  bottom: 60px;
+  left: 0; right: 0;
+  background: white;
+  border-top: 1px solid var(--slate-200);
+  z-index: 99;
+  padding: 0;
+}
+.mobile-view-tabs-inner {
+  display: flex;
+}
+.mobile-view-tab {
+  flex: 1;
+  padding: 10px 0;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--slate-500);
+  background: none;
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.mobile-view-tab.active {
+  color: var(--blue-600);
+}
+.mobile-view-tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 20%; right: 20%;
+  height: 3px;
+  background: var(--blue-500);
+  border-radius: 3px 3px 0 0;
+}
+.mobile-view-tab .unread-dot {
+  width: 8px; height: 8px;
+  background: var(--red-500);
+  border-radius: 50%;
+  display: none;
+}
+.mobile-view-tab .unread-dot.show {
+  display: inline-block;
 }
 
 .chat-messages {
@@ -1727,23 +1844,10 @@ input::placeholder { color: var(--slate-400); }
 .mobile-player-toggle i.toggle-arrow { transition: transform 0.2s; }
 .mobile-player-toggle.collapsed i.toggle-arrow { transform: rotate(-90deg); }
 
-/* ===== MOBILE CHAT TOGGLE ===== */
+/* ===== MOBILE CHAT TOGGLE (deprecated - replaced by tabs) ===== */
 .mobile-chat-toggle {
   display: none;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 8px 16px;
-  background: var(--slate-50);
-  border-top: 1px solid var(--slate-200);
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--slate-500);
-  -webkit-tap-highlight-color: transparent;
 }
-.mobile-chat-toggle i { transition: transform 0.2s; }
-.mobile-chat-toggle.open i { transform: rotate(180deg); }
 
 /* ===== RESPONSIVE ===== */
 @media (max-width: 768px) {
@@ -1795,7 +1899,10 @@ input::placeholder { color: var(--slate-400); }
   /* Show mobile-only elements */
   .mobile-action-bar { display: block; }
   .mobile-player-toggle { display: flex; }
-  .mobile-chat-toggle { display: flex; }
+  .mobile-view-tabs { display: block; }
+
+  /* Hide desktop chat resize handle on mobile */
+  .chat-resize-handle { display: none; }
 
   /* Main content area fills remaining space */
   .game-main { flex: 1; min-height: 0; }
@@ -1803,24 +1910,45 @@ input::placeholder { color: var(--slate-400); }
     flex: 1;
     overflow-y: auto;
     padding: 12px;
-    padding-bottom: 70px; /* space for mobile action bar */
+    padding-bottom: 120px; /* space for tab bar + action bar */
   }
 
-  /* Chat section - collapsible */
+  /* Chat section - mobile mode (full screen overlay) */
   .chat-section {
-    height: auto;
-    max-height: 0;
-    overflow: hidden;
-    transition: max-height 0.3s ease;
-    flex-shrink: 0;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    height: auto !important;
+    z-index: 95;
+    display: none;
+    flex-direction: column;
   }
-  .chat-section.open {
-    max-height: 200px;
+  .chat-section.mobile-visible {
+    display: flex;
   }
-  .chat-messages { max-height: 130px; }
-  .chat-input-area { padding: 8px 12px; }
+  .chat-section .chat-messages {
+    flex: 1;
+    max-height: none;
+    padding-top: 50px; /* space for header */
+    padding-bottom: 120px; /* space for input + tabs + action bar */
+  }
+  .chat-section .chat-input-area {
+    position: fixed;
+    bottom: 105px;
+    left: 0; right: 0;
+    padding: 8px 12px;
+    background: white;
+    border-top: 1px solid var(--slate-100);
+    z-index: 96;
+  }
   .chat-input-area input { padding: 8px 10px; font-size: 13px; }
   .chat-input-area button { padding: 8px 12px; font-size: 12px; }
+
+  /* Speaking summary on mobile */
+  .speaking-summary {
+    max-height: 150px;
+    padding: 8px 12px;
+  }
+  .speaking-summary-item { padding: 6px 10px; font-size: 12px; }
 
   /* Content adjustments */
   .waiting-area { margin: 8px auto; }
@@ -1932,7 +2060,7 @@ input::placeholder { color: var(--slate-400); }
   <div class="lobby-container">
     <div class="logo-section">
       <div class="logo-icon"><i class="fas fa-mask"></i></div>
-      <div class="logo-title">개콘 라이어 게임</div>
+      <div class="logo-title">시멈비 라이어게임</div>
       <div class="logo-subtitle">거짓말쟁이를 찾아라! 최대 10명과 함께하는 실시간 추리 게임</div>
     </div>
 
@@ -2037,12 +2165,20 @@ input::placeholder { color: var(--slate-400); }
       <div class="game-content" id="game-content">
         <!-- Dynamic content goes here -->
       </div>
-      <!-- Mobile: chat toggle bar -->
-      <div class="mobile-chat-toggle" id="mobile-chat-toggle" onclick="toggleChat()">
-        <i class="fas fa-chevron-up"></i>
-        <span>채팅</span>
+      <!-- Mobile: view tab switcher -->
+      <div class="mobile-view-tabs" id="mobile-view-tabs">
+        <div class="mobile-view-tabs-inner">
+          <button class="mobile-view-tab active" id="tab-game" onclick="switchMobileTab('game')">
+            <i class="fas fa-gamepad"></i> 게임
+          </button>
+          <button class="mobile-view-tab" id="tab-chat" onclick="switchMobileTab('chat')">
+            <i class="fas fa-comments"></i> 채팅 <span class="unread-dot" id="chat-unread-dot"></span>
+          </button>
+        </div>
       </div>
       <div class="chat-section" id="chat-section">
+        <div class="chat-resize-handle" id="chat-resize-handle"></div>
+        <div id="speaking-summary-container"></div>
         <div class="chat-messages" id="chat-messages"></div>
         <div class="chat-input-area">
           <input type="text" id="chat-input" placeholder="메시지를 입력하세요..." maxlength="200" autocomplete="off">
@@ -2074,6 +2210,8 @@ let state = {
   version: 0,
   roomData: null,
   wordRevealed: false,
+  mobileTab: 'game', // 'game' or 'chat'
+  chatUnread: false,
 };
 
 const avatarColors = ['av-0','av-1','av-2','av-3','av-4','av-5','av-6','av-7','av-8','av-9'];
@@ -2226,17 +2364,16 @@ function enterGameScreen() {
   showScreen('game-screen');
   state.version = 0;
   state.wordRevealed = false;
-  // On mobile, start with player list collapsed for more space
+  state.mobileTab = 'game';
+  state.chatUnread = false;
+  // On mobile, start with game tab active
   if (window.innerWidth <= 768) {
     const list = $('player-list');
     const toggle = $('mobile-player-toggle');
     if (list) list.classList.add('collapsed');
     if (toggle) toggle.classList.add('collapsed');
-    // Close chat by default
-    const chat = $('chat-section');
-    if (chat) chat.classList.remove('open');
-    const chatToggle = $('mobile-chat-toggle');
-    if (chatToggle) chatToggle.classList.remove('open');
+    // Show game, hide chat
+    switchMobileTab('game');
   }
   startPolling();
 }
@@ -2551,6 +2688,21 @@ function renderFreeChat(el, room) {
   const mins = Math.floor(remaining / 60);
   const secs = remaining % 60;
 
+  // Get speaking messages for summary
+  const speakMsgs = (state.roomData?.messages || []).filter(m => m.type === 'speak');
+  let summaryHtml = '';
+  if (speakMsgs.length > 0) {
+    summaryHtml = '<div class="speaking-summary" style="margin-top:16px;border-radius:var(--radius)">';
+    summaryHtml += '<div class="speaking-summary-title"><i class="fas fa-microphone"></i> 발언 요약</div>';
+    speakMsgs.forEach(m => {
+      summaryHtml += \`<div class="speaking-summary-item">
+        <div class="summary-nick">\${esc(m.nickname)}</div>
+        <div class="summary-text">\${esc(m.message)}</div>
+      </div>\`;
+    });
+    summaryHtml += '</div>';
+  }
+
   el.innerHTML = \`
     <div class="waiting-area animate-in">
       <div class="waiting-info">
@@ -2567,11 +2719,27 @@ function renderFreeChat(el, room) {
           </button>
         \` : ''}
       </div>
+      \${summaryHtml}
     </div>
   \`;
 }
 
 function renderExtendVote(el, room, myExtendVote) {
+  // Get speaking messages for summary
+  const speakMsgs = (state.roomData?.messages || []).filter(m => m.type === 'speak');
+  let summaryHtml = '';
+  if (speakMsgs.length > 0) {
+    summaryHtml = '<div class="speaking-summary" style="margin-top:16px;border-radius:var(--radius)">';
+    summaryHtml += '<div class="speaking-summary-title"><i class="fas fa-microphone"></i> 발언 요약</div>';
+    speakMsgs.forEach(m => {
+      summaryHtml += \`<div class="speaking-summary-item">
+        <div class="summary-nick">\${esc(m.nickname)}</div>
+        <div class="summary-text">\${esc(m.message)}</div>
+      </div>\`;
+    });
+    summaryHtml += '</div>';
+  }
+
   el.innerHTML = \`
     <div class="extend-vote-area animate-in">
       <div class="waiting-info">
@@ -2589,16 +2757,34 @@ function renderExtendVote(el, room, myExtendVote) {
           </button>
         </div>
       </div>
+      \${summaryHtml}
     </div>
   \`;
 }
 
 function renderFinalVote(el, room, players, myVote) {
   const others = players.filter(p => p.id !== state.playerId);
+
+  // Get speaking messages for summary
+  const speakMsgs = (state.roomData?.messages || []).filter(m => m.type === 'speak');
+  let summaryHtml = '';
+  if (speakMsgs.length > 0) {
+    summaryHtml = '<div class="speaking-summary" style="margin-bottom:16px;border-radius:var(--radius)">';
+    summaryHtml += '<div class="speaking-summary-title"><i class="fas fa-microphone"></i> 발언 요약</div>';
+    speakMsgs.forEach(m => {
+      summaryHtml += \`<div class="speaking-summary-item">
+        <div class="summary-nick">\${esc(m.nickname)}</div>
+        <div class="summary-text">\${esc(m.message)}</div>
+      </div>\`;
+    });
+    summaryHtml += '</div>';
+  }
+
   el.innerHTML = \`
     <div class="vote-area animate-in">
       <div class="vote-title"><i class="fas fa-user-secret"></i> 라이어를 지목하세요!</div>
       <div class="vote-subtitle">투표 현황: \${room.voteCount}/\${room.totalPlayers}</div>
+      \${summaryHtml}
       \${others.map((p, i) => {
         const selected = myVote === p.id;
         return \`
@@ -2729,6 +2915,14 @@ function renderResult(el, room, players) {
 let lastMsgCount = 0;
 function renderChat(messages) {
   if (messages.length === lastMsgCount) return;
+
+  // Mark unread if on mobile and in game tab
+  if (window.innerWidth <= 768 && state.mobileTab === 'game' && messages.length > lastMsgCount) {
+    state.chatUnread = true;
+    const dot = $('chat-unread-dot');
+    if (dot) dot.classList.add('show');
+  }
+
   lastMsgCount = messages.length;
 
   const el = $('chat-messages');
@@ -2743,6 +2937,41 @@ function renderChat(messages) {
     return \`<div class="chat-msg"><span class="nick" style="color:\${isMe ? 'var(--blue-500)' : 'var(--slate-600)'}">\${esc(m.nickname)}</span>\${esc(m.message)}</div>\`;
   }).join('');
   el.scrollTop = el.scrollHeight;
+
+  // Also render speaking summary in the chat section (desktop)
+  renderSpeakingSummaryInChat(messages);
+}
+
+function renderSpeakingSummaryInChat(messages) {
+  const container = $('speaking-summary-container');
+  if (!container) return;
+  if (!state.roomData) { container.innerHTML = ''; return; }
+
+  const phase = state.roomData.room.phase;
+  // Show summary during free_chat, vote_extend, final_vote, liar_guess phases
+  const showPhases = ['free_chat', 'vote_extend', 'final_vote', 'liar_guess'];
+  if (!showPhases.includes(phase)) {
+    container.innerHTML = '';
+    return;
+  }
+
+  const speakMsgs = messages.filter(m => m.type === 'speak');
+  if (speakMsgs.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+
+  container.innerHTML = \`
+    <div class="speaking-summary">
+      <div class="speaking-summary-title"><i class="fas fa-microphone"></i> 발언 요약</div>
+      \${speakMsgs.map(m => \`
+        <div class="speaking-summary-item">
+          <div class="summary-nick">\${esc(m.nickname)}</div>
+          <div class="summary-text">\${esc(m.message)}</div>
+        </div>
+      \`).join('')}
+    </div>
+  \`;
 }
 
 // Chat send
@@ -2861,7 +3090,34 @@ async function changeCategory(cat) {
   } catch(e) {}
 }
 
-// ===== MOBILE TOGGLES =====
+// ===== MOBILE TAB SWITCHER =====
+function switchMobileTab(tab) {
+  state.mobileTab = tab;
+  const gameContent = $('game-content');
+  const chatSection = $('chat-section');
+  const tabGame = $('tab-game');
+  const tabChat = $('tab-chat');
+
+  if (tab === 'game') {
+    if (gameContent) gameContent.style.display = '';
+    if (chatSection) chatSection.classList.remove('mobile-visible');
+    if (tabGame) tabGame.classList.add('active');
+    if (tabChat) tabChat.classList.remove('active');
+  } else {
+    if (gameContent) gameContent.style.display = 'none';
+    if (chatSection) chatSection.classList.add('mobile-visible');
+    if (tabGame) tabGame.classList.remove('active');
+    if (tabChat) tabChat.classList.add('active');
+    // Clear unread
+    state.chatUnread = false;
+    const dot = $('chat-unread-dot');
+    if (dot) dot.classList.remove('show');
+    // Scroll chat to bottom
+    const msgs = $('chat-messages');
+    if (msgs) msgs.scrollTop = msgs.scrollHeight;
+  }
+}
+
 function togglePlayerList() {
   const list = $('player-list');
   const toggle = $('mobile-player-toggle');
@@ -2869,16 +3125,65 @@ function togglePlayerList() {
   toggle.classList.toggle('collapsed');
 }
 
-function toggleChat() {
-  const chat = $('chat-section');
-  const toggle = $('mobile-chat-toggle');
-  chat.classList.toggle('open');
-  toggle.classList.toggle('open');
-  if (chat.classList.contains('open')) {
-    const msgs = $('chat-messages');
-    msgs.scrollTop = msgs.scrollHeight;
-  }
-}
+// ===== DESKTOP CHAT RESIZE HANDLE =====
+(function initChatResize() {
+  const handle = $('chat-resize-handle');
+  const chatSection = $('chat-section');
+  if (!handle || !chatSection) return;
+
+  let isDragging = false;
+  let startY = 0;
+  let startHeight = 0;
+
+  handle.addEventListener('mousedown', (e) => {
+    if (window.innerWidth <= 768) return; // Disable on mobile
+    isDragging = true;
+    startY = e.clientY;
+    startHeight = chatSection.offsetHeight;
+    handle.classList.add('dragging');
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    const diff = startY - e.clientY;
+    const newHeight = Math.min(Math.max(startHeight + diff, 80), 600);
+    chatSection.style.height = newHeight + 'px';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!isDragging) return;
+    isDragging = false;
+    handle.classList.remove('dragging');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  });
+
+  // Touch support for tablets
+  handle.addEventListener('touchstart', (e) => {
+    if (window.innerWidth <= 768) return;
+    isDragging = true;
+    startY = e.touches[0].clientY;
+    startHeight = chatSection.offsetHeight;
+    handle.classList.add('dragging');
+    e.preventDefault();
+  });
+
+  document.addEventListener('touchmove', (e) => {
+    if (!isDragging) return;
+    const diff = startY - e.touches[0].clientY;
+    const newHeight = Math.min(Math.max(startHeight + diff, 80), 600);
+    chatSection.style.height = newHeight + 'px';
+  });
+
+  document.addEventListener('touchend', () => {
+    if (!isDragging) return;
+    isDragging = false;
+    handle.classList.remove('dragging');
+  });
+})();
 
 // ===== INIT =====
 setInterval(loadRooms, 5000);
