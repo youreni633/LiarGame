@@ -1167,7 +1167,7 @@ function buildState(room: DNRoom, playerId: string, sinceVersion: number): DNSta
       : null,
     messages: visibleMessages(room, playerId),
     result: room.result,
-    availableCommands: availableCommandsFor(me, room.mode),
+    availableCommands: room.phase === "playing" ? availableCommandsFor(me, room.mode) : [],
   };
 }
 
@@ -1373,7 +1373,24 @@ export function registerDeathNoteRoutes(app: Hono) {
     if (!room) return c.json({ error: "방을 찾을 수 없습니다." }, 404);
     const body = await c.req.json();
     const playerId = String(body.playerId || "");
+    const nickname = String(body.nickname || "");
     const message = String(body.message || "");
+    if (room.phase === "lobby") {
+      const player =
+        findPlayer(room, playerId) ||
+        room.players.find((item) => item.name === nickname) ||
+        (room.players.length === 1 ? room.players[0] : undefined);
+      if (!player) return c.json({ error: "플레이어를 찾을 수 없습니다." }, 404);
+      const trimmed = message.trim();
+      if (!trimmed) return c.json({ success: true });
+      pushMessage(room, {
+        type: "public",
+        fromPlayerId: player.id,
+        text: `${player.name}: ${trimmed}`,
+      });
+      return c.json({ success: true });
+    }
+
     const actor = findAssignment(room, playerId);
     if (!actor) return c.json({ error: "플레이어를 찾을 수 없습니다." }, 404);
     processInput(room, actor, message);

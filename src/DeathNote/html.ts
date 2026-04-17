@@ -344,7 +344,7 @@ export function getDeathNoteHTML() {
       <div class="panel side-panel">
         <div class="side-card">
           <h3>내 역할 / 정보</h3>
-          <div class="role-image-wrap" id="role-image-wrap">
+          <div class="role-image-wrap" id="role-image-wrap" style="display:none;">
             <img id="role-image" alt="role" />
           </div>
           <div id="hero-title" class="role-title">역할 정보</div>
@@ -525,7 +525,7 @@ export function getDeathNoteHTML() {
       if (!message) return;
       await api('/api/deathnote/rooms/' + state.roomId + '/chat', {
         method: 'POST',
-        body: JSON.stringify({ playerId: state.playerId, message }),
+        body: JSON.stringify({ playerId: state.playerId, nickname: state.nickname, message }),
       });
       input.value = '';
     }
@@ -560,6 +560,7 @@ export function getDeathNoteHTML() {
           : myRole.explain + '\\n\\n상태: ' + myRole.deathreason + '\\n귓속말: ' + myRole.whisper + '회 / 쪽지: ' + myRole.note + '회';
       } else {
         $('role-image-wrap').style.display = 'none';
+        $('role-image').removeAttribute('src');
         $('hero-title').textContent = '역할 정보';
         $('hero-desc').textContent = '게임이 시작되면 역할 정보가 이쪽에 작게 표시됩니다.';
       }
