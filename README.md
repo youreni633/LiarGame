@@ -4,7 +4,7 @@
 - Project: browser-based liar game server for Azure Web App
 - Stack: Hono + TypeScript + Node.js
 - Runtime: single Node server that serves both game API and SPA UI
-- Current deploy version: `v1.04`
+- Current deploy version: `ver2.0`
 
 ## Run
 ```bash
@@ -43,7 +43,13 @@ npm run dev
 - The liar receives a similar word instead of the real word
 - The liar usually discovers the truth only later in the round result flow
 
-## Recent Changes In v1.04
+## Recent Changes In ver2.0
+### DeathNote Game
+- Added a fully separated DeathNote game module under `src/DeathNote/`
+- Added dedicated routes: `/deathnote` and `/api/deathnote/*`
+- Added independent DeathNote room lifecycle, role assignment, command-based skill system, result flow, and Shinigami mode timer events
+- Kept the original liar game flow on `/` and `/api/rooms/*` without replacing its room namespace
+
 ### Game Mode
 - Added room-level game mode selection
 - Added `classic` and `fool` modes
@@ -80,7 +86,7 @@ Example response:
 ```json
 {
   "ok": true,
-  "version": "v1.04",
+  "version": "ver2.0",
   "timestamp": 1713340000000
 }
 ```
@@ -110,6 +116,15 @@ This is intended for Azure warm-up, availability checks, and verifying deployed 
 | POST | `/api/rooms/:id/game-mode` | Change game mode |
 | POST | `/api/rooms/:id/kick` | Kick a player before game start |
 | GET | `/api/rooms/:id/state` | Poll room state |
+| GET | `/deathnote` | Serve DeathNote game page |
+| GET | `/api/deathnote/rooms` | List DeathNote rooms |
+| POST | `/api/deathnote/rooms` | Create DeathNote room |
+| POST | `/api/deathnote/rooms/:id/join` | Join DeathNote room |
+| POST | `/api/deathnote/rooms/:id/leave` | Leave DeathNote room |
+| POST | `/api/deathnote/rooms/:id/mode` | Change DeathNote mode |
+| POST | `/api/deathnote/rooms/:id/start` | Start DeathNote game |
+| GET | `/api/deathnote/rooms/:id/state` | Poll DeathNote room state |
+| POST | `/api/deathnote/rooms/:id/chat` | Send DeathNote chat or command |
 
 ## Azure Notes
 - The server listens on `process.env.PORT`

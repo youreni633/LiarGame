@@ -1,552 +1,1432 @@
-import { serve } from '@hono/node-server'
-import { serveStatic } from '@hono/node-server/serve-static'
-import { fileURLToPath } from 'node:url'
-import { Hono } from 'hono'
-import { cors } from 'hono/cors'
-
-const APP_VERSION = 'v1.04'
-const VOTE_TIME_LIMIT_SECONDS = 60
+import { serve } from "@hono/node-server";
+import { serveStatic } from "@hono/node-server/serve-static";
+import { fileURLToPath } from "node:url";
+import { Hono } from "hono";
+import { cors } from "hono/cors";
+import {
+  APP_VERSION,
+  VOTE_TIME_LIMIT_SECONDS,
+  advanceSpeakingTurn as advanceLiarSpeakingTurn,
+  resolveExtendVote as resolveLiarExtendVote,
+  resolveFinalVote as resolveLiarFinalVote,
+} from "./LiarGame/index.js";
+import {
+  getDeathNoteHTML,
+  registerDeathNoteRoutes,
+} from "./DeathNote/index.js";
+import type {
+  ChatMessage,
+  GameMode,
+  GamePhase,
+  Player,
+  Room,
+  Vote,
+} from "./LiarGame/index.js";
 
 // ============================================================
 // 시멈비 라이어게임 - In-Memory Game State (Edge Worker)
 // ============================================================
 
-type Player = {
-  id: string
-  nickname: string
-  ready: boolean
-  isHost: boolean
-  isLiar: boolean
-  word: string
-  lastSeen: number
-}
-
-type ChatMessage = {
-  id: string
-  playerId: string
-  nickname: string
-  message: string
-  timestamp: number
-  type: 'chat' | 'system' | 'speak'
-}
-
-type Vote = {
-  voterId: string
-  targetId: string
-}
-
-type GameMode = 'classic' | 'fool'
-
-type GamePhase =
-  | 'waiting'      // 대기실
-  | 'word_reveal'  // 제시어 공개 (각자 확인)
-  | 'speaking'     // 순서대로 발언
-  | 'free_chat'    // 자유 채팅 (3분)
-  | 'vote_extend'  // 추가 토론 투표
-  | 'speaking2'    // 2차 발언
-  | 'final_vote'   // 최종 라이어 투표
-  | 'liar_guess'   // 라이어 제시어 맞추기
-  | 'result'       // 결과 공개
-
-type Room = {
-  id: string
-  name: string
-  hostId: string
-  players: Player[]
-  maxPlayers: number
-  phase: GamePhase
-  gameMode: GameMode
-  category: string
-  realWord: string
-  liarWord: string
-  liarId: string
-  speakingOrder: string[]
-  currentSpeakerIndex: number
-  currentSpeakerStartTime: number
-  speakingTimeLimit: number // seconds per speaker
-  messages: ChatMessage[]
-  votes: Vote[]
-  extendVotes: { playerId: string; extend: boolean }[]
-  liarGuess: string
-  roundNumber: number
-  phaseStartTime: number
-  freeChatDuration: number // seconds
-  createdAt: number
-  lastActivity: number
-  version: number
-}
-
 // Word categories
 const WORD_BANK: Record<string, string[]> = {
-  '음식': ['치킨', '피자', '김치찌개', '떡볶이', '비빔밥', '삼겹살', '초밥', '파스타', '햄버거', '라면', '불고기', '갈비탕', '된장찌개', '냉면', '짜장면', '만두', '김밥', '칼국수', '부대찌개', '제육볶음'],
-  '동물': ['고양이', '강아지', '코끼리', '기린', '펭귄', '호랑이', '토끼', '햄스터', '돌고래', '독수리', '판다', '여우', '사자', '곰', '원숭이', '앵무새', '거북이', '상어', '고래', '카멜레온'],
-  '장소': ['도서관', '놀이공원', '병원', '학교', '카페', '공항', '해변', '산꼭대기', '지하철', '영화관', '박물관', '체육관', '수영장', '공원', '시장', '호텔', '편의점', '백화점', '경찰서', '소방서'],
-  '직업': ['의사', '선생님', '소방관', '요리사', '파일럿', '경찰', '간호사', '프로그래머', '변호사', '건축가', '수의사', '약사', '기자', '배우', '가수', '화가', '운동선수', '과학자', '사진작가', '유튜버'],
-  '영화/드라마': ['해리포터', '어벤져스', '겨울왕국', '기생충', '타이타닉', '인터스텔라', '오징어게임', '도깨비', '반지의제왕', '스파이더맨', '배트맨', '아이언맨', '토이스토리', '알라딘', '매트릭스'],
-  '스포츠': ['축구', '야구', '농구', '테니스', '수영', '탁구', '배드민턴', '볼링', '골프', '스키', '아이스하키', '복싱', '태권도', '양궁', '마라톤'],
-  '가전제품': ['냉장고', '세탁기', '에어컨', '전자레인지', '청소기', '텔레비전', '컴퓨터', '노트북', '스마트폰', '드라이기', '토스터', '믹서기', '공기청정기', '가습기', '제습기'],
-}
+  음식: [
+    "치킨",
+    "피자",
+    "김치찌개",
+    "떡볶이",
+    "비빔밥",
+    "삼겹살",
+    "초밥",
+    "파스타",
+    "햄버거",
+    "라면",
+    "불고기",
+    "갈비탕",
+    "된장찌개",
+    "냉면",
+    "짜장면",
+    "만두",
+    "김밥",
+    "칼국수",
+    "부대찌개",
+    "제육볶음",
+  ],
+  동물: [
+    "고양이",
+    "강아지",
+    "코끼리",
+    "기린",
+    "펭귄",
+    "호랑이",
+    "토끼",
+    "햄스터",
+    "돌고래",
+    "독수리",
+    "판다",
+    "여우",
+    "사자",
+    "곰",
+    "원숭이",
+    "앵무새",
+    "거북이",
+    "상어",
+    "고래",
+    "카멜레온",
+  ],
+  장소: [
+    "베바브",
+    "가천대학교",
+    "도서관",
+    "놀이공원",
+    "병원",
+    "학교",
+    "카페",
+    "공항",
+    "해변",
+    "산꼭대기",
+    "지하철",
+    "영화관",
+    "박물관",
+    "체육관",
+    "수영장",
+    "공원",
+    "시장",
+    "호텔",
+    "편의점",
+    "백화점",
+    "경찰서",
+    "소방서",
+  ],
+  직업: [
+    "의사",
+    "선생님",
+    "소방관",
+    "요리사",
+    "파일럿",
+    "경찰",
+    "간호사",
+    "프로그래머",
+    "변호사",
+    "건축가",
+    "수의사",
+    "약사",
+    "기자",
+    "배우",
+    "가수",
+    "화가",
+    "운동선수",
+    "과학자",
+    "사진작가",
+    "유튜버",
+  ],
+  "영화/드라마": [
+    "해리포터",
+    "어벤져스",
+    "겨울왕국",
+    "기생충",
+    "타이타닉",
+    "인터스텔라",
+    "오징어게임",
+    "도깨비",
+    "반지의제왕",
+    "스파이더맨",
+    "배트맨",
+    "아이언맨",
+    "토이스토리",
+    "알라딘",
+    "매트릭스",
+  ],
+  스포츠: [
+    "축구",
+    "야구",
+    "농구",
+    "테니스",
+    "수영",
+    "탁구",
+    "배드민턴",
+    "볼링",
+    "골프",
+    "스키",
+    "아이스하키",
+    "복싱",
+    "태권도",
+    "양궁",
+    "마라톤",
+  ],
+  가전제품: [
+    "냉장고",
+    "세탁기",
+    "에어컨",
+    "전자레인지",
+    "청소기",
+    "텔레비전",
+    "컴퓨터",
+    "노트북",
+    "스마트폰",
+    "드라이기",
+    "토스터",
+    "믹서기",
+    "공기청정기",
+    "가습기",
+    "제습기",
+  ],
+};
 
 // Similar words for liar (related but different)
 const LIAR_SIMILAR: Record<string, string> = {
-  '치킨': '통닭', '피자': '빵', '김치찌개': '된장찌개', '떡볶이': '라볶이', '비빔밥': '볶음밥',
-  '고양이': '강아지', '강아지': '고양이', '코끼리': '하마', '기린': '사슴', '펭귄': '오리',
-  '도서관': '서점', '놀이공원': '동물원', '병원': '약국', '학교': '학원', '카페': '식당',
-  '의사': '약사', '선생님': '교수', '소방관': '경찰', '요리사': '제빵사', '파일럿': '기장',
-}
+  치킨: "통닭",
+  피자: "빵",
+  김치찌개: "된장찌개",
+  떡볶이: "라볶이",
+  비빔밥: "볶음밥",
+  고양이: "강아지",
+  강아지: "고양이",
+  코끼리: "하마",
+  기린: "사슴",
+  펭귄: "오리",
+  도서관: "서점",
+  놀이공원: "동물원",
+  병원: "약국",
+  학교: "학원",
+  카페: "식당",
+  의사: "약사",
+  선생님: "교수",
+  소방관: "경찰",
+  요리사: "제빵사",
+  파일럿: "기장",
+};
 
 const EXPANDED_WORD_BANK: Record<string, string[]> = {
-  '음식': [
-    '김치', '피자', '치킨', '짜장면', '짬뽕', '라면', '우동', '냉면', '비빔밥', '불고기',
-    '갈비', '삼겹살', '제육볶음', '닭갈비', '찜닭', '떡볶이', '순대', '튀김', '핫도그', '김밥',
-    '주먹밥', '샌드위치', '햄버거', '파스타', '리조또', '스테이크', '돈가스', '오므라이스', '카레', '쌀국수',
-    '월남쌈', '타코', '부리토', '초밥', '사시미', '덮밥', '오징어볶음', '해물탕', '된장찌개', '순두부찌개',
-    '김치찌개', '부대찌개', '삼계탕', '갈비탕', '설렁탕', '곰탕', '매운탕', '아구찜', '조개구이', '장어구이',
-    '계란말이', '잡채', '전', '파전', '호떡', '붕어빵', '와플', '팬케이크', '도넛', '케이크',
-    '마카롱', '쿠키', '초콜릿', '젤리', '빙수', '아이스크림', '요거트', '치즈케이크', '타르트', '푸딩',
-    '복숭아', '딸기', '수박', '바나나', '사과', '배', '포도', '망고', '파인애플', '블루베리',
+  음식: [
+    "김치",
+    "피자",
+    "치킨",
+    "짜장면",
+    "짬뽕",
+    "라면",
+    "우동",
+    "냉면",
+    "비빔밥",
+    "불고기",
+    "갈비",
+    "삼겹살",
+    "제육볶음",
+    "닭갈비",
+    "찜닭",
+    "떡볶이",
+    "순대",
+    "튀김",
+    "핫도그",
+    "김밥",
+    "주먹밥",
+    "샌드위치",
+    "햄버거",
+    "파스타",
+    "리조또",
+    "스테이크",
+    "돈가스",
+    "오므라이스",
+    "카레",
+    "쌀국수",
+    "월남쌈",
+    "타코",
+    "부리토",
+    "초밥",
+    "사시미",
+    "덮밥",
+    "오징어볶음",
+    "해물탕",
+    "된장찌개",
+    "순두부찌개",
+    "김치찌개",
+    "부대찌개",
+    "삼계탕",
+    "갈비탕",
+    "설렁탕",
+    "곰탕",
+    "매운탕",
+    "아구찜",
+    "조개구이",
+    "장어구이",
+    "계란말이",
+    "잡채",
+    "전",
+    "파전",
+    "호떡",
+    "붕어빵",
+    "와플",
+    "팬케이크",
+    "도넛",
+    "케이크",
+    "마카롱",
+    "쿠키",
+    "초콜릿",
+    "젤리",
+    "빙수",
+    "아이스크림",
+    "요거트",
+    "치즈케이크",
+    "타르트",
+    "푸딩",
+    "복숭아",
+    "딸기",
+    "수박",
+    "바나나",
+    "사과",
+    "배",
+    "포도",
+    "망고",
+    "파인애플",
+    "블루베리",
   ],
-  '동물': [
-    '고양이', '강아지', '토끼', '햄스터', '기니피그', '고슴도치', '다람쥐', '여우', '늑대', '곰',
-    '사자', '호랑이', '치타', '표범', '하이에나', '코끼리', '기린', '얼룩말', '코뿔소', '하마',
-    '원숭이', '고릴라', '침팬지', '오랑우탄', '판다', '캥거루', '코알라', '나무늘보', '수달', '비버',
-    '너구리', '라쿤', '미어캣', '족제비', '사슴', '말', '당나귀', '소', '양', '염소',
-    '돼지', '닭', '오리', '거위', '독수리', '참새', '비둘기', '까마귀', '부엉이', '펭귄',
-    '플라밍고', '백조', '앵무새', '매', '타조', '갈매기', '상어', '고래', '돌고래', '문어',
-    '오징어', '해파리', '게', '새우', '가재', '거북이', '악어', '도마뱀', '카멜레온', '뱀',
-    '개구리', '두꺼비', '금붕어', '잉어', '연어', '참치', '나비', '벌', '개미', '잠자리',
+  동물: [
+    "고양이",
+    "강아지",
+    "토끼",
+    "햄스터",
+    "기니피그",
+    "고슴도치",
+    "다람쥐",
+    "여우",
+    "늑대",
+    "곰",
+    "사자",
+    "호랑이",
+    "치타",
+    "표범",
+    "하이에나",
+    "코끼리",
+    "기린",
+    "얼룩말",
+    "코뿔소",
+    "하마",
+    "원숭이",
+    "고릴라",
+    "침팬지",
+    "오랑우탄",
+    "판다",
+    "캥거루",
+    "코알라",
+    "나무늘보",
+    "수달",
+    "비버",
+    "너구리",
+    "라쿤",
+    "미어캣",
+    "족제비",
+    "사슴",
+    "말",
+    "당나귀",
+    "소",
+    "양",
+    "염소",
+    "돼지",
+    "닭",
+    "오리",
+    "거위",
+    "독수리",
+    "참새",
+    "비둘기",
+    "까마귀",
+    "부엉이",
+    "펭귄",
+    "플라밍고",
+    "백조",
+    "앵무새",
+    "매",
+    "타조",
+    "갈매기",
+    "상어",
+    "고래",
+    "돌고래",
+    "문어",
+    "오징어",
+    "해파리",
+    "게",
+    "새우",
+    "가재",
+    "거북이",
+    "악어",
+    "도마뱀",
+    "카멜레온",
+    "뱀",
+    "개구리",
+    "두꺼비",
+    "금붕어",
+    "잉어",
+    "연어",
+    "참치",
+    "나비",
+    "벌",
+    "개미",
+    "잠자리",
   ],
-  '장소': [
-    '학교', '도서관', '병원', '약국', '카페', '식당', '빵집', '편의점', '마트', '백화점',
-    '시장', '놀이공원', '동물원', '수족관', '영화관', '공원', '미술관', '박물관', '체육관', '수영장',
-    '헬스장', '볼링장', '노래방', 'PC방', '문구점', '서점', '꽃집', '세탁소', '은행', '우체국',
-    '경찰서', '소방서', '시청', '구청', '법원', '공항', '기차역', '버스터미널', '지하철역', '주차장',
-    '호텔', '펜션', '캠핑장', '해변', '산', '계곡', '호수', '강', '섬', '정원',
-    '광장', '공연장', '경기장', '야구장', '축구장', '농구장', '테니스장', '스키장', '빙상장', '골프장',
-    '교실', '강당', '연구실', '사무실', '회의실', '공장', '창고', '정비소', '주유소', '세차장',
-    '미용실', '네일샵', '응급실', '카페테리아', '약수터', '전망대', '천문대', '온천', '찜질방', '리조트',
+  장소: [
+    "학교",
+    "도서관",
+    "병원",
+    "약국",
+    "카페",
+    "식당",
+    "빵집",
+    "편의점",
+    "마트",
+    "백화점",
+    "시장",
+    "놀이공원",
+    "동물원",
+    "수족관",
+    "영화관",
+    "공원",
+    "미술관",
+    "박물관",
+    "체육관",
+    "수영장",
+    "헬스장",
+    "볼링장",
+    "노래방",
+    "PC방",
+    "문구점",
+    "서점",
+    "꽃집",
+    "세탁소",
+    "은행",
+    "우체국",
+    "경찰서",
+    "소방서",
+    "시청",
+    "구청",
+    "법원",
+    "공항",
+    "기차역",
+    "버스터미널",
+    "지하철역",
+    "주차장",
+    "호텔",
+    "펜션",
+    "캠핑장",
+    "해변",
+    "산",
+    "계곡",
+    "호수",
+    "강",
+    "섬",
+    "정원",
+    "광장",
+    "공연장",
+    "경기장",
+    "야구장",
+    "축구장",
+    "농구장",
+    "테니스장",
+    "스키장",
+    "빙상장",
+    "골프장",
+    "교실",
+    "강당",
+    "연구실",
+    "사무실",
+    "회의실",
+    "공장",
+    "창고",
+    "정비소",
+    "주유소",
+    "세차장",
+    "미용실",
+    "네일샵",
+    "응급실",
+    "카페테리아",
+    "약수터",
+    "전망대",
+    "천문대",
+    "온천",
+    "찜질방",
+    "리조트",
   ],
-  '직업': [
-    '의사', '간호사', '약사', '교사', '교수', '학생', '경찰', '소방관', '군인', '변호사',
-    '판사', '검사', '기자', '아나운서', '배우', '가수', '작곡가', '화가', '조각가', '사진작가',
-    '요리사', '제빵사', '바리스타', '미용사', '네일아티스트', '디자이너', '건축가', '프로그래머', '게임개발자', '데이터분석가',
-    '기획자', '마케터', '회계사', '세무사', '은행원', '공무원', '비서', '번역가', '통역사', '작가',
-    '웹툰작가', '유튜버', '스트리머', '운동선수', '축구선수', '야구선수', '농구선수', '수영선수', '골프선수', '코치',
-    '파일럿', '승무원', '기관사', '버스기사', '택시기사', '배달기사', '정비사', '목수', '용접사', '전기기사',
-    '과학자', '연구원', '천문학자', '생물학자', '화학자', '물리학자', '수의사', '사육사', '농부', '어부',
-    '환경미화원', '부동산중개사', '상담사', '심리학자', '사회복지사', '치과의사', '치위생사', '보육교사', '사서', '큐레이터',
+  직업: [
+    "의사",
+    "간호사",
+    "약사",
+    "교사",
+    "교수",
+    "학생",
+    "경찰",
+    "소방관",
+    "군인",
+    "변호사",
+    "판사",
+    "검사",
+    "기자",
+    "아나운서",
+    "배우",
+    "가수",
+    "작곡가",
+    "화가",
+    "조각가",
+    "사진작가",
+    "요리사",
+    "제빵사",
+    "바리스타",
+    "미용사",
+    "네일아티스트",
+    "디자이너",
+    "건축가",
+    "프로그래머",
+    "게임개발자",
+    "데이터분석가",
+    "기획자",
+    "마케터",
+    "회계사",
+    "세무사",
+    "은행원",
+    "공무원",
+    "비서",
+    "번역가",
+    "통역사",
+    "작가",
+    "웹툰작가",
+    "유튜버",
+    "스트리머",
+    "운동선수",
+    "축구선수",
+    "야구선수",
+    "농구선수",
+    "수영선수",
+    "골프선수",
+    "코치",
+    "파일럿",
+    "승무원",
+    "기관사",
+    "버스기사",
+    "택시기사",
+    "배달기사",
+    "정비사",
+    "목수",
+    "용접사",
+    "전기기사",
+    "과학자",
+    "연구원",
+    "천문학자",
+    "생물학자",
+    "화학자",
+    "물리학자",
+    "수의사",
+    "사육사",
+    "농부",
+    "어부",
+    "환경미화원",
+    "부동산중개사",
+    "상담사",
+    "심리학자",
+    "사회복지사",
+    "치과의사",
+    "치위생사",
+    "보육교사",
+    "사서",
+    "큐레이터",
   ],
-  '영화/드라마': [
-    '해리포터', '반지의제왕', '어벤져스', '아이언맨', '스파이더맨', '배트맨', '슈퍼맨', '캡틴아메리카', '토르', '헐크',
-    '겨울왕국', '토이스토리', '인사이드아웃', '코코', '업', '라따뚜이', '월E', '니모를찾아서', '몬스터주식회사', '알라딘',
-    '라이온킹', '미녀와야수', '인어공주', '모아나', '주토피아', '슈렉', '쿵푸팬더', '드래곤길들이기', '미니언즈', '슈퍼배드',
-    '기생충', '올드보이', '부산행', '극한직업', '명량', '암살', '범죄도시', '신과함께', '도둑들', '국제시장',
-    '타이타닉', '아바타', '인터스텔라', '인셉션', '테넷', '매트릭스', '존윅', '미션임파서블', '분노의질주', '007',
-    '라라랜드', '위대한쇼맨', '맘마미아', '보헤미안랩소디', '레미제라블', '노트북', '귀멸의칼날', '센과치히로의행방불명', '하울의움직이는성', '너의이름은',
-    '날씨의아이', '슬램덩크', '원피스', '나루토', '드래곤볼', '포켓몬', '디지몬', '짱구는못말려', '도깨비', '미생',
-    '응답하라1988', '슬기로운의사생활', '이상한변호사우영우', '오징어게임', '더글로리', '킹덤', '사랑의불시착', '태양의후예', '비밀의숲', '무빙',
+  "영화/드라마": [
+    "해리포터",
+    "반지의제왕",
+    "어벤져스",
+    "아이언맨",
+    "스파이더맨",
+    "배트맨",
+    "슈퍼맨",
+    "캡틴아메리카",
+    "토르",
+    "헐크",
+    "겨울왕국",
+    "토이스토리",
+    "인사이드아웃",
+    "코코",
+    "업",
+    "라따뚜이",
+    "월E",
+    "니모를찾아서",
+    "몬스터주식회사",
+    "알라딘",
+    "라이온킹",
+    "미녀와야수",
+    "인어공주",
+    "모아나",
+    "주토피아",
+    "슈렉",
+    "쿵푸팬더",
+    "드래곤길들이기",
+    "미니언즈",
+    "슈퍼배드",
+    "기생충",
+    "올드보이",
+    "부산행",
+    "극한직업",
+    "명량",
+    "암살",
+    "범죄도시",
+    "신과함께",
+    "도둑들",
+    "국제시장",
+    "타이타닉",
+    "아바타",
+    "인터스텔라",
+    "인셉션",
+    "테넷",
+    "매트릭스",
+    "존윅",
+    "미션임파서블",
+    "분노의질주",
+    "007",
+    "라라랜드",
+    "위대한쇼맨",
+    "맘마미아",
+    "보헤미안랩소디",
+    "레미제라블",
+    "노트북",
+    "귀멸의칼날",
+    "센과치히로의행방불명",
+    "하울의움직이는성",
+    "너의이름은",
+    "날씨의아이",
+    "슬램덩크",
+    "원피스",
+    "나루토",
+    "드래곤볼",
+    "포켓몬",
+    "디지몬",
+    "짱구는못말려",
+    "도깨비",
+    "미생",
+    "응답하라1988",
+    "슬기로운의사생활",
+    "이상한변호사우영우",
+    "오징어게임",
+    "더글로리",
+    "킹덤",
+    "사랑의불시착",
+    "태양의후예",
+    "비밀의숲",
+    "무빙",
   ],
-  '스포츠': [
-    '축구', '야구', '농구', '배구', '탁구', '테니스', '배드민턴', '골프', '볼링', '당구',
-    '수영', '다이빙', '서핑', '요트', '카약', '조정', '양궁', '사격', '펜싱', '유도',
-    '태권도', '복싱', '킥복싱', '레슬링', '씨름', '체조', '리듬체조', '육상', '마라톤', '높이뛰기',
-    '멀리뛰기', '창던지기', '역도', '승마', '사이클', '산악자전거', '스케이트보드', '인라인스케이트', '스키', '스노보드',
-    '피겨스케이팅', '쇼트트랙', '스피드스케이팅', '아이스하키', '컬링', '봅슬레이', 'e스포츠', '체스', '바둑', '피구',
-    '풋살', '족구', '핸드볼', '럭비', '미식축구', '크리켓', '클라이밍', '철인3종', '크로스핏', '필라테스',
-    '요가', '줄넘기', '팔씨름', '스쿼시', '라크로스', '드론레이싱', '레이싱', '카트', '브레이킹', '암벽등반',
+  스포츠: [
+    "축구",
+    "야구",
+    "농구",
+    "배구",
+    "탁구",
+    "테니스",
+    "배드민턴",
+    "골프",
+    "볼링",
+    "당구",
+    "수영",
+    "다이빙",
+    "서핑",
+    "요트",
+    "카약",
+    "조정",
+    "양궁",
+    "사격",
+    "펜싱",
+    "유도",
+    "태권도",
+    "복싱",
+    "킥복싱",
+    "레슬링",
+    "씨름",
+    "체조",
+    "리듬체조",
+    "육상",
+    "마라톤",
+    "높이뛰기",
+    "멀리뛰기",
+    "창던지기",
+    "역도",
+    "승마",
+    "사이클",
+    "산악자전거",
+    "스케이트보드",
+    "인라인스케이트",
+    "스키",
+    "스노보드",
+    "피겨스케이팅",
+    "쇼트트랙",
+    "스피드스케이팅",
+    "아이스하키",
+    "컬링",
+    "봅슬레이",
+    "e스포츠",
+    "체스",
+    "바둑",
+    "피구",
+    "풋살",
+    "족구",
+    "핸드볼",
+    "럭비",
+    "미식축구",
+    "크리켓",
+    "클라이밍",
+    "철인3종",
+    "크로스핏",
+    "필라테스",
+    "요가",
+    "줄넘기",
+    "팔씨름",
+    "스쿼시",
+    "라크로스",
+    "드론레이싱",
+    "레이싱",
+    "카트",
+    "브레이킹",
+    "암벽등반",
   ],
-  '가전제품': [
-    '냉장고', '김치냉장고', '세탁기', '건조기', '에어컨', '선풍기', '서큘레이터', '공기청정기', '가습기', '제습기',
-    '청소기', '로봇청소기', '전자레인지', '오븐', '에어프라이어', '전기밥솥', '인덕션', '가스레인지', '식기세척기', '정수기',
-    '커피머신', '믹서기', '블렌더', '토스터', '전기포트', '전기그릴', 'TV', '프로젝터', '사운드바', '스피커',
-    '헤드폰', '이어폰', '노트북', '데스크톱', '모니터', '프린터', '복합기', '태블릿', '스마트폰', '스마트워치',
-    '게임기', '공유기', '웹캠', '외장하드', '보조배터리', '키보드', '마우스', '안마의자', '전기장판', '히터',
-    '드라이기', '고데기', '면도기', '전동칫솔', '비데', '스타일러', '의류관리기', '도어락', '인터폰', '와인셀러',
-    'AI스피커', '미니냉장고', '휴대용선풍기', '전기주전자', '살균기', '소독기', '탈취기', '재봉틀', '무드등', '전기담요',
+  가전제품: [
+    "냉장고",
+    "김치냉장고",
+    "세탁기",
+    "건조기",
+    "에어컨",
+    "선풍기",
+    "서큘레이터",
+    "공기청정기",
+    "가습기",
+    "제습기",
+    "청소기",
+    "로봇청소기",
+    "전자레인지",
+    "오븐",
+    "에어프라이어",
+    "전기밥솥",
+    "인덕션",
+    "가스레인지",
+    "식기세척기",
+    "정수기",
+    "커피머신",
+    "믹서기",
+    "블렌더",
+    "토스터",
+    "전기포트",
+    "전기그릴",
+    "TV",
+    "프로젝터",
+    "사운드바",
+    "스피커",
+    "헤드폰",
+    "이어폰",
+    "노트북",
+    "데스크톱",
+    "모니터",
+    "프린터",
+    "복합기",
+    "태블릿",
+    "스마트폰",
+    "스마트워치",
+    "게임기",
+    "공유기",
+    "웹캠",
+    "외장하드",
+    "보조배터리",
+    "키보드",
+    "마우스",
+    "안마의자",
+    "전기장판",
+    "히터",
+    "드라이기",
+    "고데기",
+    "면도기",
+    "전동칫솔",
+    "비데",
+    "스타일러",
+    "의류관리기",
+    "도어락",
+    "인터폰",
+    "와인셀러",
+    "AI스피커",
+    "미니냉장고",
+    "휴대용선풍기",
+    "전기주전자",
+    "살균기",
+    "소독기",
+    "탈취기",
+    "재봉틀",
+    "무드등",
+    "전기담요",
   ],
-  '교통수단': [
-    '자동차', '세단', 'SUV', '쿠페', '해치백', '경차', '스포츠카', '전기차', '하이브리드차', '택시',
-    '버스', '고속버스', '트럭', '덤프트럭', '소방차', '구급차', '경찰차', '오토바이', '스쿠터', '자전거',
-    '전동킥보드', '기차', 'KTX', '지하철', '트램', '모노레일', '케이블카', '비행기', '여객기', '전투기',
-    '헬리콥터', '드론', '열기구', '패러글라이더', '우주선', '로켓', '잠수함', '유람선', '크루즈', '보트',
-    '카누', '카약', '요트', '페리', '제트스키', '휠체어', '스케이트보드', '인라인', '트랙터', '굴착기',
-    '지게차', '전동휠', '삼륜차', '사륜바이크', '견인차', '캠핑카', '카라반', '리무진', '택배차', '냉동탑차',
+  교통수단: [
+    "자동차",
+    "세단",
+    "SUV",
+    "쿠페",
+    "해치백",
+    "경차",
+    "스포츠카",
+    "전기차",
+    "하이브리드차",
+    "택시",
+    "버스",
+    "고속버스",
+    "트럭",
+    "덤프트럭",
+    "소방차",
+    "구급차",
+    "경찰차",
+    "오토바이",
+    "스쿠터",
+    "자전거",
+    "전동킥보드",
+    "기차",
+    "KTX",
+    "지하철",
+    "트램",
+    "모노레일",
+    "케이블카",
+    "비행기",
+    "여객기",
+    "전투기",
+    "헬리콥터",
+    "드론",
+    "열기구",
+    "패러글라이더",
+    "우주선",
+    "로켓",
+    "잠수함",
+    "유람선",
+    "크루즈",
+    "보트",
+    "카누",
+    "카약",
+    "요트",
+    "페리",
+    "제트스키",
+    "휠체어",
+    "스케이트보드",
+    "인라인",
+    "트랙터",
+    "굴착기",
+    "지게차",
+    "전동휠",
+    "삼륜차",
+    "사륜바이크",
+    "견인차",
+    "캠핑카",
+    "카라반",
+    "리무진",
+    "택배차",
+    "냉동탑차",
   ],
-  '학교용품': [
-    '연필', '샤프', '볼펜', '만년필', '형광펜', '색연필', '사인펜', '매직', '지우개', '수정테이프',
-    '연필깎이', '자', '삼각자', '각도기', '컴퍼스', '노트', '공책', '오답노트', '스프링노트', '메모지',
-    '포스트잇', '파일', '클리어파일', '바인더', '클립', '집게', '스테이플러', '펀치', '가위', '커터칼',
-    '풀', '딱풀', '테이프', '양면테이프', '색종이', '도화지', '스케치북', '필통', '책가방', '실내화',
-    '실내화주머니', '도시락가방', '물통', '독서대', '책받침', '시간표', '이름표', '계산기', '전자사전', '태블릿',
-    '노트북', 'USB메모리', '화이트보드', '보드마카', '칠판지우개', '분필', '시험지', '프린트물', '스티커', '북마크',
+  학교용품: [
+    "연필",
+    "샤프",
+    "볼펜",
+    "만년필",
+    "형광펜",
+    "색연필",
+    "사인펜",
+    "매직",
+    "지우개",
+    "수정테이프",
+    "연필깎이",
+    "자",
+    "삼각자",
+    "각도기",
+    "컴퍼스",
+    "노트",
+    "공책",
+    "오답노트",
+    "스프링노트",
+    "메모지",
+    "포스트잇",
+    "파일",
+    "클리어파일",
+    "바인더",
+    "클립",
+    "집게",
+    "스테이플러",
+    "펀치",
+    "가위",
+    "커터칼",
+    "풀",
+    "딱풀",
+    "테이프",
+    "양면테이프",
+    "색종이",
+    "도화지",
+    "스케치북",
+    "필통",
+    "책가방",
+    "실내화",
+    "실내화주머니",
+    "도시락가방",
+    "물통",
+    "독서대",
+    "책받침",
+    "시간표",
+    "이름표",
+    "계산기",
+    "전자사전",
+    "태블릿",
+    "노트북",
+    "USB메모리",
+    "화이트보드",
+    "보드마카",
+    "칠판지우개",
+    "분필",
+    "시험지",
+    "프린트물",
+    "스티커",
+    "북마크",
   ],
-  '의류/패션': [
-    '티셔츠', '셔츠', '맨투맨', '후드티', '니트', '가디건', '블라우스', '원피스', '치마', '청바지',
-    '슬랙스', '반바지', '트레이닝복', '레깅스', '점퍼', '패딩', '코트', '재킷', '블레이저', '조끼',
-    '잠옷', '속옷', '양말', '스타킹', '운동화', '구두', '로퍼', '샌들', '슬리퍼', '부츠',
-    '모자', '비니', '캡모자', '버킷햇', '목도리', '장갑', '선글라스', '안경', '귀걸이', '목걸이',
-    '팔찌', '반지', '시계', '벨트', '넥타이', '브로치', '헤어핀', '머리띠', '가방', '백팩',
-    '크로스백', '토트백', '에코백', '클러치', '지갑', '향수', '립스틱', '쿠션', '파운데이션', '한복',
+  "의류/패션": [
+    "티셔츠",
+    "셔츠",
+    "맨투맨",
+    "후드티",
+    "니트",
+    "가디건",
+    "블라우스",
+    "원피스",
+    "치마",
+    "청바지",
+    "슬랙스",
+    "반바지",
+    "트레이닝복",
+    "레깅스",
+    "점퍼",
+    "패딩",
+    "코트",
+    "재킷",
+    "블레이저",
+    "조끼",
+    "잠옷",
+    "속옷",
+    "양말",
+    "스타킹",
+    "운동화",
+    "구두",
+    "로퍼",
+    "샌들",
+    "슬리퍼",
+    "부츠",
+    "모자",
+    "비니",
+    "캡모자",
+    "버킷햇",
+    "목도리",
+    "장갑",
+    "선글라스",
+    "안경",
+    "귀걸이",
+    "목걸이",
+    "팔찌",
+    "반지",
+    "시계",
+    "벨트",
+    "넥타이",
+    "브로치",
+    "헤어핀",
+    "머리띠",
+    "가방",
+    "백팩",
+    "크로스백",
+    "토트백",
+    "에코백",
+    "클러치",
+    "지갑",
+    "향수",
+    "립스틱",
+    "쿠션",
+    "파운데이션",
+    "한복",
   ],
-  '자연/날씨': [
-    '해', '달', '별', '구름', '비', '눈', '우박', '번개', '천둥', '무지개',
-    '안개', '서리', '이슬', '바람', '태풍', '폭풍', '햇살', '노을', '새벽', '황혼',
-    '봄', '여름', '가을', '겨울', '장마', '한파', '폭염', '미세먼지', '황사', '꽃',
-    '장미', '튤립', '해바라기', '벚꽃', '민들레', '코스모스', '라벤더', '단풍', '나무', '소나무',
-    '숲', '정글', '사막', '오아시스', '산', '화산', '빙하', '바다', '파도', '해변',
-    '모래사장', '섬', '강', '폭포', '호수', '연못', '계곡', '동굴', '바위', '조약돌',
+  "자연/날씨": [
+    "해",
+    "달",
+    "별",
+    "구름",
+    "비",
+    "눈",
+    "우박",
+    "번개",
+    "천둥",
+    "무지개",
+    "안개",
+    "서리",
+    "이슬",
+    "바람",
+    "태풍",
+    "폭풍",
+    "햇살",
+    "노을",
+    "새벽",
+    "황혼",
+    "봄",
+    "여름",
+    "가을",
+    "겨울",
+    "장마",
+    "한파",
+    "폭염",
+    "미세먼지",
+    "황사",
+    "꽃",
+    "장미",
+    "튤립",
+    "해바라기",
+    "벚꽃",
+    "민들레",
+    "코스모스",
+    "라벤더",
+    "단풍",
+    "나무",
+    "소나무",
+    "숲",
+    "정글",
+    "사막",
+    "오아시스",
+    "산",
+    "화산",
+    "빙하",
+    "바다",
+    "파도",
+    "해변",
+    "모래사장",
+    "섬",
+    "강",
+    "폭포",
+    "호수",
+    "연못",
+    "계곡",
+    "동굴",
+    "바위",
+    "조약돌",
   ],
-  '게임/취미': [
-    '보드게임', '체스', '장기', '바둑', '오목', '포커', '마술', '퍼즐', '큐브', '레고',
-    '뜨개질', '자수', '재봉', '그림그리기', '수채화', '유화', '캘리그라피', '사진촬영', '영상편집', '독서',
-    '글쓰기', '피아노', '기타', '바이올린', '드럼', '우쿨렐레', '노래부르기', '댄스', '러닝', '등산',
-    '캠핑', '낚시', '드라이브', '여행', '베이킹', '요리', '홈카페', '수집', '피규어수집', '게임',
-    '롤', '오버워치', '마인크래프트', '테트리스', '동물의숲', '젤다', '포켓몬스터', '리듬게임', 'VR게임', '방탈출',
-    '컬러링북', '원예', '가드닝', '반려식물', '캔들만들기', '비누만들기', '도예', '목공', '3D프린팅', 'DIY',
+  "게임/취미": [
+    "보드게임",
+    "체스",
+    "장기",
+    "바둑",
+    "오목",
+    "포커",
+    "마술",
+    "퍼즐",
+    "큐브",
+    "레고",
+    "뜨개질",
+    "자수",
+    "재봉",
+    "그림그리기",
+    "수채화",
+    "유화",
+    "캘리그라피",
+    "사진촬영",
+    "영상편집",
+    "독서",
+    "글쓰기",
+    "피아노",
+    "기타",
+    "바이올린",
+    "드럼",
+    "우쿨렐레",
+    "노래부르기",
+    "댄스",
+    "러닝",
+    "등산",
+    "캠핑",
+    "낚시",
+    "드라이브",
+    "여행",
+    "베이킹",
+    "요리",
+    "홈카페",
+    "수집",
+    "피규어수집",
+    "게임",
+    "롤",
+    "오버워치",
+    "마인크래프트",
+    "테트리스",
+    "동물의숲",
+    "젤다",
+    "포켓몬스터",
+    "리듬게임",
+    "VR게임",
+    "방탈출",
+    "컬러링북",
+    "원예",
+    "가드닝",
+    "반려식물",
+    "캔들만들기",
+    "비누만들기",
+    "도예",
+    "목공",
+    "3D프린팅",
+    "DIY",
   ],
-}
+};
 
 const EXPANDED_LIAR_SIMILAR: Record<string, string> = {
-  '김치': '깍두기',
-  '피자': '파스타',
-  '치킨': '닭강정',
-  '짜장면': '짬뽕',
-  '라면': '우동',
-  '냉면': '막국수',
-  '비빔밥': '돌솥비빔밥',
-  '불고기': '제육볶음',
-  '갈비': '갈비찜',
-  '삼겹살': '목살',
-  '떡볶이': '로제떡볶이',
-  '김밥': '참치김밥',
-  '샌드위치': '햄버거',
-  '파스타': '리조또',
-  '초밥': '사시미',
-  '김치찌개': '부대찌개',
-  '삼계탕': '백숙',
-  '고양이': '강아지',
-  '강아지': '고양이',
-  '토끼': '햄스터',
-  '여우': '늑대',
-  '사자': '호랑이',
-  '코끼리': '하마',
-  '기린': '얼룩말',
-  '문어': '오징어',
-  '학교': '도서관',
-  '병원': '약국',
-  '카페': '식당',
-  '놀이공원': '동물원',
-  '의사': '간호사',
-  '교사': '교수',
-  '경찰': '소방관',
-  '변호사': '판사',
-  '배우': '가수',
-  '요리사': '제빵사',
-  '프로그래머': '게임개발자',
-  '유튜버': '스트리머',
-  '파일럿': '승무원',
-  '해리포터': '반지의제왕',
-  '어벤져스': '아이언맨',
-  '스파이더맨': '배트맨',
-  '겨울왕국': '모아나',
-  '기생충': '올드보이',
-  '축구': '풋살',
-  '야구': '소프트볼',
-  '농구': '3x3농구',
-  '탁구': '테니스',
-  '스키': '스노보드',
-  '냉장고': '김치냉장고',
-  '세탁기': '건조기',
-  '에어컨': '선풍기',
-  'TV': '프로젝터',
-  '스마트폰': '태블릿',
-  '자동차': '세단',
-  '전기차': '하이브리드차',
-  '버스': '지하철',
-  '비행기': '헬리콥터',
-  '연필': '샤프',
-  '볼펜': '만년필',
-  '노트': '공책',
-  '티셔츠': '셔츠',
-  '원피스': '치마',
-  '운동화': '구두',
-  '해': '달',
-  '비': '눈',
-  '봄': '가을',
-  '여름': '겨울',
-  '바다': '호수',
-  '보드게임': '체스',
-  '장기': '바둑',
-  '퍼즐': '큐브',
-  '피아노': '기타',
-  '베이킹': '요리',
-}
+  김치: "깍두기",
+  피자: "파스타",
+  치킨: "닭강정",
+  짜장면: "짬뽕",
+  라면: "우동",
+  냉면: "막국수",
+  비빔밥: "돌솥비빔밥",
+  불고기: "제육볶음",
+  갈비: "갈비찜",
+  삼겹살: "목살",
+  떡볶이: "로제떡볶이",
+  김밥: "참치김밥",
+  샌드위치: "햄버거",
+  파스타: "리조또",
+  초밥: "사시미",
+  김치찌개: "부대찌개",
+  삼계탕: "백숙",
+  고양이: "강아지",
+  강아지: "고양이",
+  토끼: "햄스터",
+  여우: "늑대",
+  사자: "호랑이",
+  코끼리: "하마",
+  기린: "얼룩말",
+  문어: "오징어",
+  학교: "도서관",
+  병원: "약국",
+  카페: "식당",
+  놀이공원: "동물원",
+  의사: "간호사",
+  교사: "교수",
+  경찰: "소방관",
+  변호사: "판사",
+  배우: "가수",
+  요리사: "제빵사",
+  프로그래머: "게임개발자",
+  유튜버: "스트리머",
+  파일럿: "승무원",
+  해리포터: "반지의제왕",
+  어벤져스: "아이언맨",
+  스파이더맨: "배트맨",
+  겨울왕국: "모아나",
+  기생충: "올드보이",
+  축구: "풋살",
+  야구: "소프트볼",
+  농구: "3x3농구",
+  탁구: "테니스",
+  스키: "스노보드",
+  냉장고: "김치냉장고",
+  세탁기: "건조기",
+  에어컨: "선풍기",
+  TV: "프로젝터",
+  스마트폰: "태블릿",
+  자동차: "세단",
+  전기차: "하이브리드차",
+  버스: "지하철",
+  비행기: "헬리콥터",
+  연필: "샤프",
+  볼펜: "만년필",
+  노트: "공책",
+  티셔츠: "셔츠",
+  원피스: "치마",
+  운동화: "구두",
+  해: "달",
+  비: "눈",
+  봄: "가을",
+  여름: "겨울",
+  바다: "호수",
+  보드게임: "체스",
+  장기: "바둑",
+  퍼즐: "큐브",
+  피아노: "기타",
+  베이킹: "요리",
+};
 
 // Global state
-const rooms = new Map<string, Room>()
-const playerSessions = new Map<string, { roomId: string; playerId: string; nickname: string }>()
+const rooms = new Map<string, Room>();
+const playerSessions = new Map<
+  string,
+  { roomId: string; playerId: string; nickname: string }
+>();
 
 function generateId(): string {
-  return Math.random().toString(36).substring(2, 10)
+  return Math.random().toString(36).substring(2, 10);
 }
 
 function cleanupStaleRooms() {
-  const now = Date.now()
+  const now = Date.now();
   for (const [id, room] of rooms) {
     // Remove players not seen in 60 seconds
-    room.players = room.players.filter(p => now - p.lastSeen < 60000)
+    room.players = room.players.filter((p) => now - p.lastSeen < 60000);
     // Remove room if empty or inactive for 10 minutes
     if (room.players.length === 0 || now - room.lastActivity > 600000) {
-      rooms.delete(id)
+      rooms.delete(id);
     }
   }
 }
 
-function getRandomWord(category: string): { realWord: string; liarWord: string } {
-  const words = EXPANDED_WORD_BANK[category] || EXPANDED_WORD_BANK['음식']
-  const realWord = words[Math.floor(Math.random() * words.length)]
-  const liarCandidates = words.filter((word) => word !== realWord)
+function getRandomWord(category: string): {
+  realWord: string;
+  liarWord: string;
+} {
+  const words = EXPANDED_WORD_BANK[category] || EXPANDED_WORD_BANK["음식"];
+  const realWord = words[Math.floor(Math.random() * words.length)];
+  const liarCandidates = words.filter((word) => word !== realWord);
   const liarWord =
     EXPANDED_LIAR_SIMILAR[realWord] ||
     liarCandidates[Math.floor(Math.random() * liarCandidates.length)] ||
-    '비밀단어'
-  return { realWord, liarWord }
+    "비밀단어";
+  return { realWord, liarWord };
 }
 
 function shuffleArray<T>(array: T[]): T[] {
-  const shuffled = [...array]
+  const shuffled = [...array];
   for (let i = shuffled.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
-  return shuffled
+  return shuffled;
 }
 
+const liarGameTransitionDeps = { generateId, shuffleArray };
+
 function startFinalVote(room: Room) {
-  room.phase = 'final_vote'
-  room.phaseStartTime = Date.now()
-  room.votes = []
+  room.phase = "final_vote";
+  room.phaseStartTime = Date.now();
+  room.votes = [];
   room.messages.push({
     id: generateId(),
-    playerId: 'system',
-    nickname: '시스템',
-    message: '🗳️ 최종 투표를 시작합니다! 라이어라고 생각하는 사람을 지목해주세요.',
+    playerId: "system",
+    nickname: "시스템",
+    message:
+      "🗳️ 최종 투표를 시작합니다! 라이어라고 생각하는 사람을 지목해주세요.",
     timestamp: Date.now(),
-    type: 'system',
-  })
+    type: "system",
+  });
 }
 
 function startSecondSpeakingRound(room: Room) {
-  room.phase = 'speaking2'
-  room.roundNumber = 2
-  room.speakingOrder = shuffleArray(room.players.map(p => p.id))
-  room.currentSpeakerIndex = 0
-  room.currentSpeakerStartTime = Date.now()
-  room.phaseStartTime = Date.now()
+  room.phase = "speaking2";
+  room.roundNumber = 2;
+  room.speakingOrder = shuffleArray(room.players.map((p) => p.id));
+  room.currentSpeakerIndex = 0;
+  room.currentSpeakerStartTime = Date.now();
+  room.phaseStartTime = Date.now();
 
-  const firstSpeaker = room.players.find(p => p.id === room.speakingOrder[0])
+  const firstSpeaker = room.players.find((p) => p.id === room.speakingOrder[0]);
   room.messages.push({
     id: generateId(),
-    playerId: 'system',
-    nickname: '시스템',
+    playerId: "system",
+    nickname: "시스템",
     message: `🗣️ 추가 토론이 결정되었습니다! 첫 번째 발언자는 ${firstSpeaker?.nickname}`,
     timestamp: Date.now(),
-    type: 'system',
-  })
+    type: "system",
+  });
 }
 
 function advanceSpeakingTurn(room: Room, skipped = false) {
-  const currentSpeakerId = room.speakingOrder[room.currentSpeakerIndex]
-  const currentSpeaker = room.players.find(p => p.id === currentSpeakerId)
+  const currentSpeakerId = room.speakingOrder[room.currentSpeakerIndex];
+  const currentSpeaker = room.players.find((p) => p.id === currentSpeakerId);
 
   if (skipped && currentSpeaker) {
     room.messages.push({
       id: generateId(),
-      playerId: 'system',
-      nickname: '시스템',
+      playerId: "system",
+      nickname: "시스템",
       message: `⏱️ ${currentSpeaker.nickname}님의 발언 시간이 종료되어 다음 차례로 넘어갑니다.`,
       timestamp: Date.now(),
-      type: 'system',
-    })
+      type: "system",
+    });
   }
 
-  room.currentSpeakerIndex++
-  room.version++
-  room.lastActivity = Date.now()
+  room.currentSpeakerIndex++;
+  room.version++;
+  room.lastActivity = Date.now();
 
   if (room.currentSpeakerIndex >= room.speakingOrder.length) {
-    if (room.phase === 'speaking') {
-      room.phase = 'free_chat'
-      room.phaseStartTime = Date.now()
+    if (room.phase === "speaking") {
+      room.phase = "free_chat";
+      room.phaseStartTime = Date.now();
       room.messages.push({
         id: generateId(),
-        playerId: 'system',
-        nickname: '시스템',
+        playerId: "system",
+        nickname: "시스템",
         message: `💬 자유 토론 시간입니다! (${room.freeChatDuration / 60}분)`,
         timestamp: Date.now(),
-        type: 'system',
-      })
+        type: "system",
+      });
     } else {
-      startFinalVote(room)
+      startFinalVote(room);
     }
-    room.version++
-    return
+    room.version++;
+    return;
   }
 
-  const nextSpeaker = room.players.find(p => p.id === room.speakingOrder[room.currentSpeakerIndex])
-  room.currentSpeakerStartTime = Date.now()
+  const nextSpeaker = room.players.find(
+    (p) => p.id === room.speakingOrder[room.currentSpeakerIndex],
+  );
+  room.currentSpeakerStartTime = Date.now();
   room.messages.push({
     id: generateId(),
-    playerId: 'system',
-    nickname: '시스템',
+    playerId: "system",
+    nickname: "시스템",
     message: `🎤 다음 발언자는 ${nextSpeaker?.nickname}`,
     timestamp: Date.now(),
-    type: 'system',
-  })
+    type: "system",
+  });
 }
 
 function resolveExtendVote(room: Room, timedOut = false) {
-  const yesCount = room.extendVotes.filter(v => v.extend).length
-  const noCount = room.extendVotes.filter(v => !v.extend).length
+  const yesCount = room.extendVotes.filter((v) => v.extend).length;
+  const noCount = room.extendVotes.filter((v) => !v.extend).length;
 
   if (timedOut) {
     room.messages.push({
       id: generateId(),
-      playerId: 'system',
-      nickname: '시스템',
-      message: '⏱️ 추가 토론 투표 시간이 종료되었습니다. 현재까지의 투표로 결과를 계산합니다.',
+      playerId: "system",
+      nickname: "시스템",
+      message:
+        "⏱️ 추가 토론 투표 시간이 종료되었습니다. 현재까지의 투표로 결과를 계산합니다.",
       timestamp: Date.now(),
-      type: 'system',
-    })
+      type: "system",
+    });
   }
 
   if (yesCount > noCount) {
-    startSecondSpeakingRound(room)
+    startSecondSpeakingRound(room);
   } else {
-    startFinalVote(room)
+    startFinalVote(room);
   }
-  room.version++
-  room.lastActivity = Date.now()
+  room.version++;
+  room.lastActivity = Date.now();
 }
 
 function resolveFinalVote(room: Room, timedOut = false) {
-  const voteCounts: Record<string, number> = {}
-  room.votes.forEach(v => {
-    voteCounts[v.targetId] = (voteCounts[v.targetId] || 0) + 1
-  })
+  const voteCounts: Record<string, number> = {};
+  room.votes.forEach((v) => {
+    voteCounts[v.targetId] = (voteCounts[v.targetId] || 0) + 1;
+  });
 
   if (timedOut) {
     room.messages.push({
       id: generateId(),
-      playerId: 'system',
-      nickname: '시스템',
-      message: '⏱️ 최종 투표 시간이 종료되었습니다. 현재까지의 투표로 결과를 계산합니다.',
+      playerId: "system",
+      nickname: "시스템",
+      message:
+        "⏱️ 최종 투표 시간이 종료되었습니다. 현재까지의 투표로 결과를 계산합니다.",
       timestamp: Date.now(),
-      type: 'system',
-    })
+      type: "system",
+    });
   }
 
-  let maxVotes = 0
-  let mostVotedId = ''
-  let isTie = false
+  let maxVotes = 0;
+  let mostVotedId = "";
+  let isTie = false;
   Object.entries(voteCounts).forEach(([id, count]) => {
     if (count > maxVotes) {
-      maxVotes = count
-      mostVotedId = id
-      isTie = false
+      maxVotes = count;
+      mostVotedId = id;
+      isTie = false;
     } else if (count === maxVotes && count > 0) {
-      isTie = true
+      isTie = true;
     }
-  })
+  });
 
-  const mostVotedPlayer = room.players.find(p => p.id === mostVotedId)
+  const mostVotedPlayer = room.players.find((p) => p.id === mostVotedId);
 
   if (!mostVotedId || isTie) {
-    const liarPlayer = room.players.find(p => p.id === room.liarId)
-    room.phase = 'result'
-    room.phaseStartTime = Date.now()
+    const liarPlayer = room.players.find((p) => p.id === room.liarId);
+    room.phase = "result";
+    room.phaseStartTime = Date.now();
     room.messages.push({
       id: generateId(),
-      playerId: 'system',
-      nickname: '시스템',
+      playerId: "system",
+      nickname: "시스템",
       message: `🤷 투표가 없거나 동률이 발생했습니다. 라이어 ${liarPlayer?.nickname}님이 살아남아 승리했습니다!`,
       timestamp: Date.now(),
-      type: 'system',
-    })
-    room.version++
-    room.lastActivity = Date.now()
-    return
+      type: "system",
+    });
+    room.version++;
+    room.lastActivity = Date.now();
+    return;
   }
 
   if (mostVotedId === room.liarId) {
-    room.phase = 'liar_guess'
-    room.phaseStartTime = Date.now()
+    room.phase = "liar_guess";
+    room.phaseStartTime = Date.now();
     room.messages.push({
       id: generateId(),
-      playerId: 'system',
-      nickname: '시스템',
+      playerId: "system",
+      nickname: "시스템",
       message: `🎯 ${mostVotedPlayer?.nickname}님이 지목되었습니다! 라이어입니다! 하지만 제시어를 맞히면 라이어의 승리!`,
       timestamp: Date.now(),
-      type: 'system',
-    })
+      type: "system",
+    });
   } else {
-    const liarPlayer = room.players.find(p => p.id === room.liarId)
-    room.phase = 'result'
-    room.phaseStartTime = Date.now()
+    const liarPlayer = room.players.find((p) => p.id === room.liarId);
+    room.phase = "result";
+    room.phaseStartTime = Date.now();
     room.messages.push({
       id: generateId(),
-      playerId: 'system',
-      nickname: '시스템',
+      playerId: "system",
+      nickname: "시스템",
       message: `❌ ${mostVotedPlayer?.nickname}님이 지목되었지만 라이어가 아닙니다! 라이어는 ${liarPlayer?.nickname}님이었습니다. 🎭 라이어 승리!`,
       timestamp: Date.now(),
-      type: 'system',
-    })
+      type: "system",
+    });
   }
 
-  room.version++
-  room.lastActivity = Date.now()
+  room.version++;
+  room.lastActivity = Date.now();
 }
 
 // ============================================================
 // Hono App
 // ============================================================
-const app = new Hono()
-app.use('/api/*', cors())
+const app = new Hono();
+app.use("/api/*", cors());
+registerDeathNoteRoutes(app);
 
 // Static assets for Azure App Service / Node.js runtime
-const publicRoot = fileURLToPath(new URL('../public', import.meta.url))
-app.use('/static/*', serveStatic({ root: publicRoot }))
+const publicRoot = fileURLToPath(new URL("../public", import.meta.url));
+app.use("/static/*", serveStatic({ root: publicRoot }));
 
 // Lightweight health endpoint for warm-up / availability checks
-app.get('/health', (c) => c.json({ ok: true, version: APP_VERSION, timestamp: Date.now() }))
+app.get("/health", (c) =>
+  c.json({ ok: true, version: APP_VERSION, timestamp: Date.now() }),
+);
 
 // --- Room List ---
-app.get('/api/rooms', (c) => {
-  cleanupStaleRooms()
-  const roomList = Array.from(rooms.values()).map(r => ({
+app.get("/api/rooms", (c) => {
+  cleanupStaleRooms();
+  const roomList = Array.from(rooms.values()).map((r) => ({
     id: r.id,
     name: r.name,
-    hostNickname: r.players.find(p => p.isHost)?.nickname || '???',
+    hostNickname: r.players.find((p) => p.isHost)?.nickname || "???",
     playerCount: r.players.length,
     maxPlayers: r.maxPlayers,
     phase: r.phase,
     category: r.category,
     createdAt: r.createdAt,
-  }))
-  return c.json({ rooms: roomList })
-})
+  }));
+  return c.json({ rooms: roomList });
+});
 
 // --- Create Room ---
-app.post('/api/rooms', async (c) => {
-  const body = await c.req.json()
-  const { nickname, roomName, category, maxPlayers, speakingTimeLimit, gameMode } = body
+app.post("/api/rooms", async (c) => {
+  const body = await c.req.json();
+  const {
+    nickname,
+    roomName,
+    category,
+    maxPlayers,
+    speakingTimeLimit,
+    gameMode,
+  } = body;
 
   if (!nickname || !roomName) {
-    return c.json({ error: '닉네임과 방 이름을 입력해주세요.' }, 400)
+    return c.json({ error: "닉네임과 방 이름을 입력해주세요." }, 400);
   }
 
-  const roomId = generateId()
-  const playerId = generateId()
+  const roomId = generateId();
+  const playerId = generateId();
 
   const player: Player = {
     id: playerId,
@@ -554,9 +1434,9 @@ app.post('/api/rooms', async (c) => {
     ready: true, // host is always ready
     isHost: true,
     isLiar: false,
-    word: '',
+    word: "",
     lastSeen: Date.now(),
-  }
+  };
 
   const room: Room = {
     id: roomId,
@@ -564,12 +1444,12 @@ app.post('/api/rooms', async (c) => {
     hostId: playerId,
     players: [player],
     maxPlayers: Math.min(Math.max(maxPlayers || 4, 3), 10),
-    phase: 'waiting',
-    gameMode: gameMode === 'fool' ? 'fool' : 'classic',
-    category: category || '음식',
-    realWord: '',
-    liarWord: '',
-    liarId: '',
+    phase: "waiting",
+    gameMode: gameMode === "fool" ? "fool" : "classic",
+    category: category || "음식",
+    realWord: "",
+    liarWord: "",
+    liarId: "",
     speakingOrder: [],
     currentSpeakerIndex: 0,
     currentSpeakerStartTime: 0,
@@ -577,267 +1457,290 @@ app.post('/api/rooms', async (c) => {
     messages: [],
     votes: [],
     extendVotes: [],
-    liarGuess: '',
+    liarGuess: "",
     roundNumber: 1,
     phaseStartTime: Date.now(),
     freeChatDuration: 180,
     createdAt: Date.now(),
     lastActivity: Date.now(),
-    version: 0,
-  }
+    version: 1,
+  };
 
-  rooms.set(roomId, room)
-  playerSessions.set(playerId, { roomId, playerId, nickname })
+  rooms.set(roomId, room);
+  playerSessions.set(playerId, { roomId, playerId, nickname });
 
-  return c.json({ roomId, playerId })
-})
+  return c.json({ roomId, playerId });
+});
 
 // --- Join Room ---
-app.post('/api/rooms/:roomId/join', async (c) => {
-  const roomId = c.req.param('roomId')
-  const { nickname } = await c.req.json()
+app.post("/api/rooms/:roomId/join", async (c) => {
+  const roomId = c.req.param("roomId");
+  const { nickname } = await c.req.json();
 
-  const room = rooms.get(roomId)
-  if (!room) return c.json({ error: '방을 찾을 수 없습니다.' }, 404)
-  if (room.phase !== 'waiting') return c.json({ error: '이미 게임이 진행 중입니다.' }, 400)
-  if (room.players.length >= room.maxPlayers) return c.json({ error: '방이 가득 찼습니다.' }, 400)
-  if (room.players.some(p => p.nickname === nickname)) return c.json({ error: '이미 사용 중인 닉네임입니다.' }, 400)
+  const room = rooms.get(roomId);
+  if (!room) return c.json({ error: "방을 찾을 수 없습니다." }, 404);
+  if (room.phase !== "waiting")
+    return c.json({ error: "이미 게임이 진행 중입니다." }, 400);
+  if (room.players.length >= room.maxPlayers)
+    return c.json({ error: "방이 가득 찼습니다." }, 400);
+  if (room.players.some((p) => p.nickname === nickname))
+    return c.json({ error: "이미 사용 중인 닉네임입니다." }, 400);
 
-  const playerId = generateId()
+  const playerId = generateId();
   const player: Player = {
     id: playerId,
     nickname,
     ready: false,
     isHost: false,
     isLiar: false,
-    word: '',
+    word: "",
     lastSeen: Date.now(),
-  }
+  };
 
-  room.players.push(player)
-  room.lastActivity = Date.now()
-  room.version++
+  room.players.push(player);
+  room.lastActivity = Date.now();
+  room.version++;
   room.messages.push({
     id: generateId(),
-    playerId: 'system',
-    nickname: '시스템',
+    playerId: "system",
+    nickname: "시스템",
     message: `${nickname}님이 입장했습니다.`,
     timestamp: Date.now(),
-    type: 'system',
-  })
+    type: "system",
+  });
 
-  playerSessions.set(playerId, { roomId, playerId, nickname })
+  playerSessions.set(playerId, { roomId, playerId, nickname });
 
-  return c.json({ roomId, playerId })
-})
+  return c.json({ roomId, playerId });
+});
 
 // --- Leave Room ---
-app.post('/api/rooms/:roomId/leave', async (c) => {
-  const roomId = c.req.param('roomId')
-  const { playerId } = await c.req.json()
+app.post("/api/rooms/:roomId/leave", async (c) => {
+  const roomId = c.req.param("roomId");
+  const { playerId } = await c.req.json();
 
-  const room = rooms.get(roomId)
-  if (!room) return c.json({ error: '방을 찾을 수 없습니다.' }, 404)
+  const room = rooms.get(roomId);
+  if (!room) return c.json({ error: "방을 찾을 수 없습니다." }, 404);
 
-  const player = room.players.find(p => p.id === playerId)
-  if (!player) return c.json({ error: '플레이어를 찾을 수 없습니다.' }, 404)
+  const player = room.players.find((p) => p.id === playerId);
+  if (!player) return c.json({ error: "플레이어를 찾을 수 없습니다." }, 404);
 
-  room.players = room.players.filter(p => p.id !== playerId)
-  room.version++
-  playerSessions.delete(playerId)
+  room.players = room.players.filter((p) => p.id !== playerId);
+  room.version++;
+  playerSessions.delete(playerId);
 
   room.messages.push({
     id: generateId(),
-    playerId: 'system',
-    nickname: '시스템',
+    playerId: "system",
+    nickname: "시스템",
     message: `${player.nickname}님이 퇴장했습니다.`,
     timestamp: Date.now(),
-    type: 'system',
-  })
+    type: "system",
+  });
 
   // If host left, assign new host
   if (player.isHost && room.players.length > 0) {
-    room.players[0].isHost = true
-    room.hostId = room.players[0].id
+    room.players[0].isHost = true;
+    room.hostId = room.players[0].id;
     room.messages.push({
       id: generateId(),
-      playerId: 'system',
-      nickname: '시스템',
+      playerId: "system",
+      nickname: "시스템",
       message: `${room.players[0].nickname}님이 새로운 방장이 되었습니다.`,
       timestamp: Date.now(),
-      type: 'system',
-    })
+      type: "system",
+    });
   }
 
   if (room.players.length === 0) {
-    rooms.delete(roomId)
+    rooms.delete(roomId);
   }
 
-  return c.json({ success: true })
-})
+  return c.json({ success: true });
+});
 
 // --- Kick Player (host only, waiting phase) ---
-app.post('/api/rooms/:roomId/kick', async (c) => {
-  const roomId = c.req.param('roomId')
-  const { playerId, targetId } = await c.req.json()
+app.post("/api/rooms/:roomId/kick", async (c) => {
+  const roomId = c.req.param("roomId");
+  const { playerId, targetId } = await c.req.json();
 
-  const room = rooms.get(roomId)
-  if (!room) return c.json({ error: '방을 찾을 수 없습니다.' }, 404)
-  if (room.hostId !== playerId) return c.json({ error: '방장만 플레이어를 강퇴할 수 있습니다.' }, 403)
-  if (room.phase !== 'waiting') return c.json({ error: '게임 시작 전 대기실에서만 강퇴할 수 있습니다.' }, 400)
-  if (playerId === targetId) return c.json({ error: '방장은 자기 자신을 강퇴할 수 없습니다.' }, 400)
+  const room = rooms.get(roomId);
+  if (!room) return c.json({ error: "방을 찾을 수 없습니다." }, 404);
+  if (room.hostId !== playerId)
+    return c.json({ error: "방장만 플레이어를 강퇴할 수 있습니다." }, 403);
+  if (room.phase !== "waiting")
+    return c.json(
+      { error: "게임 시작 전 대기실에서만 강퇴할 수 있습니다." },
+      400,
+    );
+  if (playerId === targetId)
+    return c.json({ error: "방장은 자기 자신을 강퇴할 수 없습니다." }, 400);
 
-  const targetPlayer = room.players.find(p => p.id === targetId)
-  if (!targetPlayer) return c.json({ error: '플레이어를 찾을 수 없습니다.' }, 404)
-  if (targetPlayer.isHost) return c.json({ error: '방장은 강퇴할 수 없습니다.' }, 400)
+  const targetPlayer = room.players.find((p) => p.id === targetId);
+  if (!targetPlayer)
+    return c.json({ error: "플레이어를 찾을 수 없습니다." }, 404);
+  if (targetPlayer.isHost)
+    return c.json({ error: "방장은 강퇴할 수 없습니다." }, 400);
 
-  room.players = room.players.filter(p => p.id !== targetId)
-  room.version++
-  room.lastActivity = Date.now()
-  playerSessions.delete(targetId)
+  room.players = room.players.filter((p) => p.id !== targetId);
+  room.version++;
+  room.lastActivity = Date.now();
+  playerSessions.delete(targetId);
 
   room.messages.push({
     id: generateId(),
-    playerId: 'system',
-    nickname: '시스템',
+    playerId: "system",
+    nickname: "시스템",
     message: `${targetPlayer.nickname}님이 방에서 강퇴되었습니다.`,
     timestamp: Date.now(),
-    type: 'system',
-  })
+    type: "system",
+  });
 
-  return c.json({ success: true })
-})
+  return c.json({ success: true });
+});
 
 // --- Toggle Ready ---
-app.post('/api/rooms/:roomId/ready', async (c) => {
-  const roomId = c.req.param('roomId')
-  const { playerId } = await c.req.json()
+app.post("/api/rooms/:roomId/ready", async (c) => {
+  const roomId = c.req.param("roomId");
+  const { playerId } = await c.req.json();
 
-  const room = rooms.get(roomId)
-  if (!room) return c.json({ error: '방을 찾을 수 없습니다.' }, 404)
-  if (room.phase !== 'waiting') return c.json({ error: '게임이 이미 진행 중입니다.' }, 400)
+  const room = rooms.get(roomId);
+  if (!room) return c.json({ error: "방을 찾을 수 없습니다." }, 404);
+  if (room.phase !== "waiting")
+    return c.json({ error: "게임이 이미 진행 중입니다." }, 400);
 
-  const player = room.players.find(p => p.id === playerId)
-  if (!player) return c.json({ error: '플레이어를 찾을 수 없습니다.' }, 404)
-  if (player.isHost) return c.json({ error: '방장은 항상 준비 상태입니다.' }, 400)
+  const player = room.players.find((p) => p.id === playerId);
+  if (!player) return c.json({ error: "플레이어를 찾을 수 없습니다." }, 404);
+  if (player.isHost)
+    return c.json({ error: "방장은 항상 준비 상태입니다." }, 400);
 
-  player.ready = !player.ready
-  room.version++
-  room.lastActivity = Date.now()
+  player.ready = !player.ready;
+  room.version++;
+  room.lastActivity = Date.now();
 
-  return c.json({ ready: player.ready })
-})
+  return c.json({ ready: player.ready });
+});
 
 // --- Start Game ---
-app.post('/api/rooms/:roomId/start', async (c) => {
-  const roomId = c.req.param('roomId')
-  const { playerId } = await c.req.json()
+app.post("/api/rooms/:roomId/start", async (c) => {
+  const roomId = c.req.param("roomId");
+  const { playerId } = await c.req.json();
 
-  const room = rooms.get(roomId)
-  if (!room) return c.json({ error: '방을 찾을 수 없습니다.' }, 404)
-  if (room.hostId !== playerId) return c.json({ error: '방장만 게임을 시작할 수 있습니다.' }, 403)
-  if (room.players.length < 3) return c.json({ error: '최소 3명이 필요합니다.' }, 400)
+  const room = rooms.get(roomId);
+  if (!room) return c.json({ error: "방을 찾을 수 없습니다." }, 404);
+  if (room.hostId !== playerId)
+    return c.json({ error: "방장만 게임을 시작할 수 있습니다." }, 403);
+  if (room.players.length < 3)
+    return c.json({ error: "최소 3명이 필요합니다." }, 400);
 
-  const allReady = room.players.every(p => p.isHost || p.ready)
-  if (!allReady) return c.json({ error: '모든 플레이어가 준비해야 합니다.' }, 400)
+  const allReady = room.players.every((p) => p.isHost || p.ready);
+  if (!allReady)
+    return c.json({ error: "모든 플레이어가 준비해야 합니다." }, 400);
 
   // Setup game
-  const { realWord, liarWord } = getRandomWord(room.category)
-  const liarIndex = Math.floor(Math.random() * room.players.length)
-  const liarPlayer = room.players[liarIndex]
+  const { realWord, liarWord } = getRandomWord(room.category);
+  const liarIndex = Math.floor(Math.random() * room.players.length);
+  const liarPlayer = room.players[liarIndex];
 
-  room.realWord = realWord
-  room.liarWord = liarWord
-  room.liarId = liarPlayer.id
-  room.roundNumber = 1
+  room.realWord = realWord;
+  room.liarWord = liarWord;
+  room.liarId = liarPlayer.id;
+  room.roundNumber = 1;
 
   // Assign words
-  room.players.forEach(p => {
-    const isLiar = p.id === liarPlayer.id
-    p.isLiar = isLiar
+  room.players.forEach((p) => {
+    const isLiar = p.id === liarPlayer.id;
+    p.isLiar = isLiar;
     p.word = isLiar
-      ? (room.gameMode === 'classic' ? '???' : liarWord)
-      : realWord
-    p.ready = false
-  })
+      ? room.gameMode === "classic"
+        ? "???"
+        : liarWord
+      : realWord;
+    p.ready = false;
+  });
 
   // Random speaking order
-  room.speakingOrder = shuffleArray(room.players.map(p => p.id))
-  room.currentSpeakerIndex = 0
-  room.currentSpeakerStartTime = 0
+  room.speakingOrder = shuffleArray(room.players.map((p) => p.id));
+  room.currentSpeakerIndex = 0;
+  room.currentSpeakerStartTime = 0;
 
-  room.phase = 'word_reveal'
-  room.phaseStartTime = Date.now()
-  room.votes = []
-  room.extendVotes = []
-  room.liarGuess = ''
-  room.version++
-  room.lastActivity = Date.now()
+  room.phase = "word_reveal";
+  room.phaseStartTime = Date.now();
+  room.votes = [];
+  room.extendVotes = [];
+  room.liarGuess = "";
+  room.version++;
+  room.lastActivity = Date.now();
 
   room.messages.push({
     id: generateId(),
-    playerId: 'system',
-    nickname: '시스템',
+    playerId: "system",
+    nickname: "시스템",
     message: `🎮 게임이 시작되었습니다! 카테고리: ${room.category}`,
     timestamp: Date.now(),
-    type: 'system',
-  })
+    type: "system",
+  });
 
-  return c.json({ success: true })
-})
+  return c.json({ success: true });
+});
 
 // --- Confirm Word (player confirms they saw their word) ---
-app.post('/api/rooms/:roomId/confirm-word', async (c) => {
-  const roomId = c.req.param('roomId')
-  const { playerId } = await c.req.json()
+app.post("/api/rooms/:roomId/confirm-word", async (c) => {
+  const roomId = c.req.param("roomId");
+  const { playerId } = await c.req.json();
 
-  const room = rooms.get(roomId)
-  if (!room) return c.json({ error: '방을 찾을 수 없습니다.' }, 404)
-  if (room.phase !== 'word_reveal') return c.json({ error: '제시어 확인 단계가 아닙니다.' }, 400)
+  const room = rooms.get(roomId);
+  if (!room) return c.json({ error: "방을 찾을 수 없습니다." }, 404);
+  if (room.phase !== "word_reveal")
+    return c.json({ error: "제시어 확인 단계가 아닙니다." }, 400);
 
-  const player = room.players.find(p => p.id === playerId)
-  if (!player) return c.json({ error: '플레이어를 찾을 수 없습니다.' }, 404)
+  const player = room.players.find((p) => p.id === playerId);
+  if (!player) return c.json({ error: "플레이어를 찾을 수 없습니다." }, 404);
 
-  player.ready = true
-  room.version++
+  player.ready = true;
+  room.version++;
 
   // If all confirmed, start speaking phase
-  if (room.players.every(p => p.ready)) {
-    room.phase = 'speaking'
-    room.currentSpeakerIndex = 0
-    room.currentSpeakerStartTime = Date.now()
-    room.phaseStartTime = Date.now()
-    room.players.forEach(p => p.ready = false)
-    room.version++
+  if (room.players.every((p) => p.ready)) {
+    room.phase = "speaking";
+    room.currentSpeakerIndex = 0;
+    room.currentSpeakerStartTime = Date.now();
+    room.phaseStartTime = Date.now();
+    room.players.forEach((p) => (p.ready = false));
+    room.version++;
 
-    const firstSpeaker = room.players.find(p => p.id === room.speakingOrder[0])
+    const firstSpeaker = room.players.find(
+      (p) => p.id === room.speakingOrder[0],
+    );
     room.messages.push({
       id: generateId(),
-      playerId: 'system',
-      nickname: '시스템',
+      playerId: "system",
+      nickname: "시스템",
       message: `🎤 발언 시작! 첫 번째 발언자: ${firstSpeaker?.nickname}`,
       timestamp: Date.now(),
-      type: 'system',
-    })
+      type: "system",
+    });
   }
 
-  return c.json({ success: true })
-})
+  return c.json({ success: true });
+});
 
 // --- Submit Speech ---
-app.post('/api/rooms/:roomId/speak', async (c) => {
-  const roomId = c.req.param('roomId')
-  const { playerId, message } = await c.req.json()
+app.post("/api/rooms/:roomId/speak", async (c) => {
+  const roomId = c.req.param("roomId");
+  const { playerId, message } = await c.req.json();
 
-  const room = rooms.get(roomId)
-  if (!room) return c.json({ error: '방을 찾을 수 없습니다.' }, 404)
-  if (room.phase !== 'speaking' && room.phase !== 'speaking2') return c.json({ error: '발언 단계가 아닙니다.' }, 400)
+  const room = rooms.get(roomId);
+  if (!room) return c.json({ error: "방을 찾을 수 없습니다." }, 404);
+  if (room.phase !== "speaking" && room.phase !== "speaking2")
+    return c.json({ error: "발언 단계가 아닙니다." }, 400);
 
-  const currentSpeakerId = room.speakingOrder[room.currentSpeakerIndex]
-  if (currentSpeakerId !== playerId) return c.json({ error: '당신의 발언 차례가 아닙니다.' }, 400)
+  const currentSpeakerId = room.speakingOrder[room.currentSpeakerIndex];
+  if (currentSpeakerId !== playerId)
+    return c.json({ error: "당신의 발언 차례가 아닙니다." }, 400);
 
-  const player = room.players.find(p => p.id === playerId)
-  if (!player) return c.json({ error: '플레이어를 찾을 수 없습니다.' }, 404)
+  const player = room.players.find((p) => p.id === playerId);
+  if (!player) return c.json({ error: "플레이어를 찾을 수 없습니다." }, 404);
 
   room.messages.push({
     id: generateId(),
@@ -845,73 +1748,76 @@ app.post('/api/rooms/:roomId/speak', async (c) => {
     nickname: player.nickname,
     message,
     timestamp: Date.now(),
-    type: 'speak',
-  })
+    type: "speak",
+  });
 
-  advanceSpeakingTurn(room)
-  return c.json({ success: true })
+      advanceLiarSpeakingTurn(room, liarGameTransitionDeps);
+  return c.json({ success: true });
 
   // Move to next speaker
-  room.currentSpeakerIndex++
-  room.version++
-  room.lastActivity = Date.now()
+  room.currentSpeakerIndex++;
+  room.version++;
+  room.lastActivity = Date.now();
 
   if (room.currentSpeakerIndex >= room.speakingOrder.length) {
     // All speakers done
-    if (room.phase === 'speaking') {
+    if (room.phase === "speaking") {
       // Move to free chat
-      room.phase = 'free_chat'
-      room.phaseStartTime = Date.now()
+      room.phase = "free_chat";
+      room.phaseStartTime = Date.now();
       room.messages.push({
         id: generateId(),
-        playerId: 'system',
-        nickname: '시스템',
+        playerId: "system",
+        nickname: "시스템",
         message: `💬 자유 토론 시간입니다! (${room.freeChatDuration / 60}분)`,
         timestamp: Date.now(),
-        type: 'system',
-      })
+        type: "system",
+      });
     } else {
       // speaking2 done -> final vote
-      room.phase = 'final_vote'
-      room.phaseStartTime = Date.now()
-      room.votes = []
+      room.phase = "final_vote";
+      room.phaseStartTime = Date.now();
+      room.votes = [];
       room.messages.push({
         id: generateId(),
-        playerId: 'system',
-        nickname: '시스템',
-        message: '🗳️ 최종 투표를 시작합니다! 라이어라고 생각하는 사람을 지목해주세요.',
+        playerId: "system",
+        nickname: "시스템",
+        message:
+          "🗳️ 최종 투표를 시작합니다! 라이어라고 생각하는 사람을 지목해주세요.",
         timestamp: Date.now(),
-        type: 'system',
-      })
+        type: "system",
+      });
     }
-    room.version++
+    room.version++;
   } else {
-    const nextSpeaker = room.players.find(p => p.id === room.speakingOrder[room.currentSpeakerIndex])
-    room.currentSpeakerStartTime = Date.now()
+    const nextSpeaker = room.players.find(
+      (p) => p.id === room.speakingOrder[room.currentSpeakerIndex],
+    );
+    room.currentSpeakerStartTime = Date.now();
     room.messages.push({
       id: generateId(),
-      playerId: 'system',
-      nickname: '시스템',
+      playerId: "system",
+      nickname: "시스템",
       message: `🎤 다음 발언자: ${nextSpeaker?.nickname}`,
       timestamp: Date.now(),
-      type: 'system',
-    })
+      type: "system",
+    });
   }
 
-  return c.json({ success: true })
-})
+  return c.json({ success: true });
+});
 
 // --- Chat (free chat phase) ---
-app.post('/api/rooms/:roomId/chat', async (c) => {
-  const roomId = c.req.param('roomId')
-  const { playerId, message } = await c.req.json()
+app.post("/api/rooms/:roomId/chat", async (c) => {
+  const roomId = c.req.param("roomId");
+  const { playerId, message } = await c.req.json();
 
-  const room = rooms.get(roomId)
-  if (!room) return c.json({ error: '방을 찾을 수 없습니다.' }, 404)
-  
+  const room = rooms.get(roomId);
+  if (!room) return c.json({ error: "방을 찾을 수 없습니다." }, 404);
+
   // Allow chat in free_chat, waiting phase, and vote phases
-  const player = room.players.find(p => p.id === playerId)
-  if (!player) return c.json({ error: '플레이어를 찾을 수 없습니다.' }, 404)
+  const player = room.players.find((p) => p.id === playerId);
+  if (!player) return c.json({ error: "플레이어를 찾을 수 없습니다." }, 404);
 
   room.messages.push({
     id: generateId(),
@@ -919,365 +1825,383 @@ app.post('/api/rooms/:roomId/chat', async (c) => {
     nickname: player.nickname,
     message,
     timestamp: Date.now(),
-    type: 'chat',
-  })
+    type: "chat",
+  });
 
   // Keep only last 200 messages
   if (room.messages.length > 200) {
-    room.messages = room.messages.slice(-200)
+    room.messages = room.messages.slice(-200);
   }
 
-  room.version++
-  room.lastActivity = Date.now()
+  room.version++;
+  room.lastActivity = Date.now();
 
-  return c.json({ success: true })
-})
+  return c.json({ success: true });
+});
 
 // --- End free chat / Vote to extend ---
-app.post('/api/rooms/:roomId/end-free-chat', async (c) => {
-  const roomId = c.req.param('roomId')
-  const { playerId } = await c.req.json()
+app.post("/api/rooms/:roomId/end-free-chat", async (c) => {
+  const roomId = c.req.param("roomId");
+  const { playerId } = await c.req.json();
 
-  const room = rooms.get(roomId)
-  if (!room) return c.json({ error: '방을 찾을 수 없습니다.' }, 404)
-  if (room.phase !== 'free_chat') return c.json({ error: '자유 채팅 단계가 아닙니다.' }, 400)
+  const room = rooms.get(roomId);
+  if (!room) return c.json({ error: "방을 찾을 수 없습니다." }, 404);
+  if (room.phase !== "free_chat")
+    return c.json({ error: "자유 채팅 단계가 아닙니다." }, 400);
 
   // Move to extend vote
-  room.phase = 'vote_extend'
-  room.phaseStartTime = Date.now()
-  room.extendVotes = []
-  room.version++
+  room.phase = "vote_extend";
+  room.phaseStartTime = Date.now();
+  room.extendVotes = [];
+  room.version++;
 
   room.messages.push({
     id: generateId(),
-    playerId: 'system',
-    nickname: '시스템',
-    message: '⏰ 자유 토론이 종료되었습니다. 추가 토론이 필요한지 투표해주세요!',
+    playerId: "system",
+    nickname: "시스템",
+    message:
+      "⏰ 자유 토론이 종료되었습니다. 추가 토론이 필요한지 투표해주세요!",
     timestamp: Date.now(),
-    type: 'system',
-  })
+    type: "system",
+  });
 
-  return c.json({ success: true })
-})
+  return c.json({ success: true });
+});
 
 // --- Vote extend ---
-app.post('/api/rooms/:roomId/vote-extend', async (c) => {
-  const roomId = c.req.param('roomId')
-  const { playerId, extend } = await c.req.json()
+app.post("/api/rooms/:roomId/vote-extend", async (c) => {
+  const roomId = c.req.param("roomId");
+  const { playerId, extend } = await c.req.json();
 
-  const room = rooms.get(roomId)
-  if (!room) return c.json({ error: '방을 찾을 수 없습니다.' }, 404)
-  if (room.phase !== 'vote_extend') return c.json({ error: '추가 토론 투표 단계가 아닙니다.' }, 400)
+  const room = rooms.get(roomId);
+  if (!room) return c.json({ error: "방을 찾을 수 없습니다." }, 404);
+  if (room.phase !== "vote_extend")
+    return c.json({ error: "추가 토론 투표 단계가 아닙니다." }, 400);
 
   // Remove previous vote
-  room.extendVotes = room.extendVotes.filter(v => v.playerId !== playerId)
-  room.extendVotes.push({ playerId, extend })
-  room.version++
+  room.extendVotes = room.extendVotes.filter((v) => v.playerId !== playerId);
+  room.extendVotes.push({ playerId, extend });
+  room.version++;
 
   // Check if all voted
   if (room.extendVotes.length >= room.players.length) {
-    resolveExtendVote(room)
-    return c.json({ success: true })
-    const extendCount = room.extendVotes.filter(v => v.extend).length
-    const majority = Math.ceil(room.players.length / 2)
+    resolveLiarExtendVote(room, liarGameTransitionDeps);
+    return c.json({ success: true });
+    const extendCount = room.extendVotes.filter((v) => v.extend).length;
+    const majority = Math.ceil(room.players.length / 2);
 
     if (extendCount >= majority) {
       // Extra round
-      room.phase = 'speaking2'
-      room.roundNumber = 2
-      room.speakingOrder = shuffleArray(room.players.map(p => p.id))
-      room.currentSpeakerIndex = 0
-      room.currentSpeakerStartTime = Date.now()
-      room.phaseStartTime = Date.now()
+      room.phase = "speaking2";
+      room.roundNumber = 2;
+      room.speakingOrder = shuffleArray(room.players.map((p) => p.id));
+      room.currentSpeakerIndex = 0;
+      room.currentSpeakerStartTime = Date.now();
+      room.phaseStartTime = Date.now();
 
-      const firstSpeaker = room.players.find(p => p.id === room.speakingOrder[0])
+      const firstSpeaker = room.players.find(
+        (p) => p.id === room.speakingOrder[0],
+      );
       room.messages.push({
         id: generateId(),
-        playerId: 'system',
-        nickname: '시스템',
+        playerId: "system",
+        nickname: "시스템",
         message: `🔄 추가 토론이 결정되었습니다! 첫 번째 발언자: ${firstSpeaker?.nickname}`,
         timestamp: Date.now(),
-        type: 'system',
-      })
+        type: "system",
+      });
     } else {
       // Go to final vote
-      room.phase = 'final_vote'
-      room.phaseStartTime = Date.now()
-      room.votes = []
+      room.phase = "final_vote";
+      room.phaseStartTime = Date.now();
+      room.votes = [];
 
       room.messages.push({
         id: generateId(),
-        playerId: 'system',
-        nickname: '시스템',
-        message: '🗳️ 최종 투표를 시작합니다! 라이어라고 생각하는 사람을 지목해주세요.',
+        playerId: "system",
+        nickname: "시스템",
+        message:
+          "🗳️ 최종 투표를 시작합니다! 라이어라고 생각하는 사람을 지목해주세요.",
         timestamp: Date.now(),
-        type: 'system',
-      })
+        type: "system",
+      });
     }
-    room.version++
+    room.version++;
   }
 
-  return c.json({ success: true })
-})
+  return c.json({ success: true });
+});
 
 // --- Final Vote ---
-app.post('/api/rooms/:roomId/vote', async (c) => {
-  const roomId = c.req.param('roomId')
-  const { playerId, targetId } = await c.req.json()
+app.post("/api/rooms/:roomId/vote", async (c) => {
+  const roomId = c.req.param("roomId");
+  const { playerId, targetId } = await c.req.json();
 
-  const room = rooms.get(roomId)
-  if (!room) return c.json({ error: '방을 찾을 수 없습니다.' }, 404)
-  if (room.phase !== 'final_vote') return c.json({ error: '투표 단계가 아닙니다.' }, 400)
+  const room = rooms.get(roomId);
+  if (!room) return c.json({ error: "방을 찾을 수 없습니다." }, 404);
+  if (room.phase !== "final_vote")
+    return c.json({ error: "투표 단계가 아닙니다." }, 400);
 
   // Remove previous vote
-  room.votes = room.votes.filter(v => v.voterId !== playerId)
-  room.votes.push({ voterId: playerId, targetId })
-  room.version++
+  room.votes = room.votes.filter((v) => v.voterId !== playerId);
+  room.votes.push({ voterId: playerId, targetId });
+  room.version++;
 
   // Check if all voted
   if (room.votes.length >= room.players.length) {
-    resolveFinalVote(room)
-    return c.json({ success: true })
+    resolveLiarFinalVote(room, liarGameTransitionDeps);
+    return c.json({ success: true });
     // Count votes
-    const voteCounts: Record<string, number> = {}
-    room.votes.forEach(v => {
-      voteCounts[v.targetId] = (voteCounts[v.targetId] || 0) + 1
-    })
+    const voteCounts: Record<string, number> = {};
+    room.votes.forEach((v) => {
+      voteCounts[v.targetId] = (voteCounts[v.targetId] || 0) + 1;
+    });
 
     // Find most voted
-    let maxVotes = 0
-    let mostVotedId = ''
+    let maxVotes = 0;
+    let mostVotedId = "";
     Object.entries(voteCounts).forEach(([id, count]) => {
       if (count > maxVotes) {
-        maxVotes = count
-        mostVotedId = id
+        maxVotes = count;
+        mostVotedId = id;
       }
-    })
+    });
 
-    const mostVotedPlayer = room.players.find(p => p.id === mostVotedId)
+    const mostVotedPlayer = room.players.find((p) => p.id === mostVotedId);
 
     if (mostVotedId === room.liarId) {
       // Liar was caught! But liar gets a chance to guess the word
-      room.phase = 'liar_guess'
-      room.phaseStartTime = Date.now()
+      room.phase = "liar_guess";
+      room.phaseStartTime = Date.now();
       room.messages.push({
         id: generateId(),
-        playerId: 'system',
-        nickname: '시스템',
+        playerId: "system",
+        nickname: "시스템",
         message: `🎯 ${mostVotedPlayer?.nickname}님이 지목되었습니다! 라이어입니다! 하지만 제시어를 맞추면 라이어의 승리!`,
         timestamp: Date.now(),
-        type: 'system',
-      })
+        type: "system",
+      });
     } else {
       // Wrong person voted -> Liar wins
-      const liarPlayer = room.players.find(p => p.id === room.liarId)
-      room.phase = 'result'
-      room.phaseStartTime = Date.now()
+      const liarPlayer = room.players.find((p) => p.id === room.liarId);
+      room.phase = "result";
+      room.phaseStartTime = Date.now();
       room.messages.push({
         id: generateId(),
-        playerId: 'system',
-        nickname: '시스템',
+        playerId: "system",
+        nickname: "시스템",
         message: `❌ ${mostVotedPlayer?.nickname}님이 지목되었지만 라이어가 아닙니다! 라이어는 ${liarPlayer?.nickname}님이었습니다. 🎉 라이어 승리!`,
         timestamp: Date.now(),
-        type: 'system',
-      })
+        type: "system",
+      });
     }
-    room.version++
+    room.version++;
   }
 
-  return c.json({ success: true })
-})
+  return c.json({ success: true });
+});
 
 // --- Liar Guess ---
-app.post('/api/rooms/:roomId/liar-guess', async (c) => {
-  const roomId = c.req.param('roomId')
-  const { playerId, guess } = await c.req.json()
+app.post("/api/rooms/:roomId/liar-guess", async (c) => {
+  const roomId = c.req.param("roomId");
+  const { playerId, guess } = await c.req.json();
 
-  const room = rooms.get(roomId)
-  if (!room) return c.json({ error: '방을 찾을 수 없습니다.' }, 404)
-  if (room.phase !== 'liar_guess') return c.json({ error: '라이어 추측 단계가 아닙니다.' }, 400)
-  if (playerId !== room.liarId) return c.json({ error: '라이어만 제시어를 맞출 수 있습니다.' }, 403)
+  const room = rooms.get(roomId);
+  if (!room) return c.json({ error: "방을 찾을 수 없습니다." }, 404);
+  if (room.phase !== "liar_guess")
+    return c.json({ error: "라이어 추측 단계가 아닙니다." }, 400);
+  if (playerId !== room.liarId)
+    return c.json({ error: "라이어만 제시어를 맞출 수 있습니다." }, 403);
 
-  room.liarGuess = guess
-  const liarPlayer = room.players.find(p => p.id === room.liarId)
+  room.liarGuess = guess;
+  const liarPlayer = room.players.find((p) => p.id === room.liarId);
 
   if (guess.trim() === room.realWord.trim()) {
     // Liar guessed correctly -> Liar wins!
     room.messages.push({
       id: generateId(),
-      playerId: 'system',
-      nickname: '시스템',
+      playerId: "system",
+      nickname: "시스템",
       message: `🎉 라이어 ${liarPlayer?.nickname}님이 제시어 "${room.realWord}"을(를) 맞췄습니다! 라이어 승리!`,
       timestamp: Date.now(),
-      type: 'system',
-    })
+      type: "system",
+    });
   } else {
     room.messages.push({
       id: generateId(),
-      playerId: 'system',
-      nickname: '시스템',
+      playerId: "system",
+      nickname: "시스템",
       message: `✅ 라이어 ${liarPlayer?.nickname}님이 "${guess}"(을)를 제출했지만 틀렸습니다! 정답은 "${room.realWord}"! 시민 승리!`,
       timestamp: Date.now(),
-      type: 'system',
-    })
+      type: "system",
+    });
   }
 
-  room.phase = 'result'
-  room.phaseStartTime = Date.now()
-  room.version++
+  room.phase = "result";
+  room.phaseStartTime = Date.now();
+  room.version++;
 
-  return c.json({ success: true })
-})
+  return c.json({ success: true });
+});
 
 // --- New Game (back to waiting) ---
-app.post('/api/rooms/:roomId/new-game', async (c) => {
-  const roomId = c.req.param('roomId')
-  const { playerId } = await c.req.json()
+app.post("/api/rooms/:roomId/new-game", async (c) => {
+  const roomId = c.req.param("roomId");
+  const { playerId } = await c.req.json();
 
-  const room = rooms.get(roomId)
-  if (!room) return c.json({ error: '방을 찾을 수 없습니다.' }, 404)
-  if (room.hostId !== playerId) return c.json({ error: '방장만 새 게임을 시작할 수 있습니다.' }, 403)
+  const room = rooms.get(roomId);
+  if (!room) return c.json({ error: "방을 찾을 수 없습니다." }, 404);
+  if (room.hostId !== playerId)
+    return c.json({ error: "방장만 새 게임을 시작할 수 있습니다." }, 403);
 
-  room.phase = 'waiting'
-  room.realWord = ''
-  room.liarWord = ''
-  room.liarId = ''
-  room.speakingOrder = []
-  room.currentSpeakerIndex = 0
-  room.votes = []
-  room.extendVotes = []
-  room.liarGuess = ''
-  room.roundNumber = 1
-  room.messages = []
-  room.players.forEach(p => {
-    p.ready = p.isHost
-    p.isLiar = false
-    p.word = ''
-  })
-  room.phaseStartTime = Date.now()
-  room.version++
-  room.lastActivity = Date.now()
+  room.phase = "waiting";
+  room.realWord = "";
+  room.liarWord = "";
+  room.liarId = "";
+  room.speakingOrder = [];
+  room.currentSpeakerIndex = 0;
+  room.votes = [];
+  room.extendVotes = [];
+  room.liarGuess = "";
+  room.roundNumber = 1;
+  room.messages = [];
+  room.players.forEach((p) => {
+    p.ready = p.isHost;
+    p.isLiar = false;
+    p.word = "";
+  });
+  room.phaseStartTime = Date.now();
+  room.version++;
+  room.lastActivity = Date.now();
 
   room.messages.push({
     id: generateId(),
-    playerId: 'system',
-    nickname: '시스템',
-    message: '🔄 새로운 게임이 준비되었습니다!',
+    playerId: "system",
+    nickname: "시스템",
+    message: "🔄 새로운 게임이 준비되었습니다!",
     timestamp: Date.now(),
-    type: 'system',
-  })
+    type: "system",
+  });
 
-  return c.json({ success: true })
-})
+  return c.json({ success: true });
+});
 
 // --- Change Category ---
-app.post('/api/rooms/:roomId/category', async (c) => {
-  const roomId = c.req.param('roomId')
-  const { playerId, category } = await c.req.json()
+app.post("/api/rooms/:roomId/category", async (c) => {
+  const roomId = c.req.param("roomId");
+  const { playerId, category } = await c.req.json();
 
-  const room = rooms.get(roomId)
-  if (!room) return c.json({ error: '방을 찾을 수 없습니다.' }, 404)
-  if (room.hostId !== playerId) return c.json({ error: '방장만 카테고리를 변경할 수 있습니다.' }, 403)
-  if (room.phase !== 'waiting') return c.json({ error: '게임 중에는 변경할 수 없습니다.' }, 400)
+  const room = rooms.get(roomId);
+  if (!room) return c.json({ error: "방을 찾을 수 없습니다." }, 404);
+  if (room.hostId !== playerId)
+    return c.json({ error: "방장만 카테고리를 변경할 수 있습니다." }, 403);
+  if (room.phase !== "waiting")
+    return c.json({ error: "게임 중에는 변경할 수 없습니다." }, 400);
 
-  room.category = category
-  room.version++
+  room.category = category;
+  room.version++;
 
-  return c.json({ success: true })
-})
+  return c.json({ success: true });
+});
 
 // --- Change Game Mode ---
-app.post('/api/rooms/:roomId/game-mode', async (c) => {
-  const roomId = c.req.param('roomId')
-  const { playerId, gameMode } = await c.req.json()
+app.post("/api/rooms/:roomId/game-mode", async (c) => {
+  const roomId = c.req.param("roomId");
+  const { playerId, gameMode } = await c.req.json();
 
-  const room = rooms.get(roomId)
-  if (!room) return c.json({ error: '방을 찾을 수 없습니다.' }, 404)
-  if (room.hostId !== playerId) return c.json({ error: '방장만 게임 모드를 변경할 수 있습니다.' }, 403)
-  if (room.phase !== 'waiting') return c.json({ error: '게임 중에는 변경할 수 없습니다.' }, 400)
+  const room = rooms.get(roomId);
+  if (!room) return c.json({ error: "방을 찾을 수 없습니다." }, 404);
+  if (room.hostId !== playerId)
+    return c.json({ error: "방장만 게임 모드를 변경할 수 있습니다." }, 403);
+  if (room.phase !== "waiting")
+    return c.json({ error: "게임 중에는 변경할 수 없습니다." }, 400);
 
-  room.gameMode = gameMode === 'fool' ? 'fool' : 'classic'
-  room.version++
+  room.gameMode = gameMode === "fool" ? "fool" : "classic";
+  room.version++;
 
-  return c.json({ success: true })
-})
+  return c.json({ success: true });
+});
 
 // --- Get Room State (Polling) ---
-app.get('/api/rooms/:roomId/state', (c) => {
-  const roomId = c.req.param('roomId')
-  const playerId = c.req.query('playerId') || ''
-  const sinceVersion = parseInt(c.req.query('v') || '0')
+app.get("/api/rooms/:roomId/state", (c) => {
+  const roomId = c.req.param("roomId");
+  const playerId = c.req.query("playerId") || "";
+  const sinceVersion = parseInt(c.req.query("v") || "0");
 
-  const room = rooms.get(roomId)
-  if (!room) return c.json({ error: '방을 찾을 수 없습니다.' }, 404)
+  const room = rooms.get(roomId);
+  if (!room) return c.json({ error: "방을 찾을 수 없습니다." }, 404);
 
   // Update player lastSeen
-  const player = room.players.find(p => p.id === playerId)
+  const player = room.players.find((p) => p.id === playerId);
   if (player) {
-    player.lastSeen = Date.now()
+    player.lastSeen = Date.now();
   }
 
   // Auto-transition: free_chat timeout
-  if (room.phase === 'free_chat') {
-    const elapsed = (Date.now() - room.phaseStartTime) / 1000
+  if (room.phase === "free_chat") {
+    const elapsed = (Date.now() - room.phaseStartTime) / 1000;
     if (elapsed >= room.freeChatDuration) {
-      room.phase = 'vote_extend'
-      room.phaseStartTime = Date.now()
-      room.extendVotes = []
-      room.version++
+      room.phase = "vote_extend";
+      room.phaseStartTime = Date.now();
+      room.extendVotes = [];
+      room.version++;
       room.messages.push({
         id: generateId(),
-        playerId: 'system',
-        nickname: '시스템',
-        message: '⏰ 자유 토론 시간이 종료되었습니다. 추가 토론 투표를 진행합니다.',
+        playerId: "system",
+        nickname: "시스템",
+        message:
+          "⏰ 자유 토론 시간이 종료되었습니다. 추가 토론 투표를 진행합니다.",
         timestamp: Date.now(),
-        type: 'system',
-      })
+        type: "system",
+      });
     }
   }
 
-  if ((room.phase === 'speaking' || room.phase === 'speaking2') && room.currentSpeakerStartTime > 0) {
-    const speakingElapsed = (Date.now() - room.currentSpeakerStartTime) / 1000
+  if (
+    (room.phase === "speaking" || room.phase === "speaking2") &&
+    room.currentSpeakerStartTime > 0
+  ) {
+    const speakingElapsed = (Date.now() - room.currentSpeakerStartTime) / 1000;
     if (speakingElapsed >= room.speakingTimeLimit) {
-      advanceSpeakingTurn(room, true)
+      advanceLiarSpeakingTurn(room, liarGameTransitionDeps, true);
     }
   }
 
-  if (room.phase === 'vote_extend') {
-    const voteElapsed = (Date.now() - room.phaseStartTime) / 1000
+  if (room.phase === "vote_extend") {
+    const voteElapsed = (Date.now() - room.phaseStartTime) / 1000;
     if (voteElapsed >= VOTE_TIME_LIMIT_SECONDS) {
-      resolveExtendVote(room, true)
+      resolveLiarExtendVote(room, liarGameTransitionDeps, true);
     }
   }
 
-  if (room.phase === 'final_vote') {
-    const finalVoteElapsed = (Date.now() - room.phaseStartTime) / 1000
+  if (room.phase === "final_vote") {
+    const finalVoteElapsed = (Date.now() - room.phaseStartTime) / 1000;
     if (finalVoteElapsed >= VOTE_TIME_LIMIT_SECONDS) {
-      resolveFinalVote(room, true)
+      resolveLiarFinalVote(room, liarGameTransitionDeps, true);
     }
   }
 
   // No change since last poll
   if (room.version <= sinceVersion) {
-    return c.json({ changed: false, version: room.version })
+    return c.json({ changed: false, version: room.version });
   }
 
   // Build state for this player
-  const currentSpeakerId = room.speakingOrder[room.currentSpeakerIndex] || ''
+  const currentSpeakerId = room.speakingOrder[room.currentSpeakerIndex] || "";
 
   // Vote results (only show when result phase)
-  let voteResults: Record<string, number> | undefined
-  if (room.phase === 'result' || room.phase === 'liar_guess') {
-    voteResults = {}
-    room.votes.forEach(v => {
-      voteResults![v.targetId] = (voteResults![v.targetId] || 0) + 1
-    })
+  let voteResults: Record<string, number> | undefined;
+  if (room.phase === "result" || room.phase === "liar_guess") {
+    voteResults = {};
+    room.votes.forEach((v) => {
+      voteResults![v.targetId] = (voteResults![v.targetId] || 0) + 1;
+    });
   }
 
   const shouldRevealLiarRole =
-    room.gameMode === 'classic' ||
-    room.phase === 'liar_guess' ||
-    room.phase === 'result'
+    room.gameMode === "classic" ||
+    room.phase === "liar_guess" ||
+    room.phase === "result";
 
   return c.json({
     changed: true,
@@ -1303,50 +2227,60 @@ app.get('/api/rooms/:roomId/state', (c) => {
       extendVoteCount: room.extendVotes.length,
       totalPlayers: room.players.length,
       voteResults,
-      liarId: (room.phase === 'result' || room.phase === 'liar_guess') ? room.liarId : undefined,
-      realWord: (room.phase === 'result') ? room.realWord : undefined,
-      liarWord: (room.phase === 'result') ? room.liarWord : undefined,
-      liarGuess: room.phase === 'result' ? room.liarGuess : undefined,
+      liarId:
+        room.phase === "result" || room.phase === "liar_guess"
+          ? room.liarId
+          : undefined,
+      realWord: room.phase === "result" ? room.realWord : undefined,
+      liarWord: room.phase === "result" ? room.liarWord : undefined,
+      liarGuess: room.phase === "result" ? room.liarGuess : undefined,
     },
-    myWord: player?.word || '',
-    isLiar: shouldRevealLiarRole ? (player?.isLiar || false) : false,
-    players: room.players.map(p => ({
+    myWord: player?.word || "",
+    isLiar: shouldRevealLiarRole ? player?.isLiar || false : false,
+    players: room.players.map((p) => ({
       id: p.id,
       nickname: p.nickname,
       ready: p.ready,
       isHost: p.isHost,
-      isLiar: (room.phase === 'result' || room.phase === 'liar_guess') ? p.isLiar : undefined,
+      isLiar:
+        room.phase === "result" || room.phase === "liar_guess"
+          ? p.isLiar
+          : undefined,
     })),
     messages: room.messages.slice(-100),
-    myVote: room.votes.find(v => v.voterId === playerId)?.targetId,
-    myExtendVote: room.extendVotes.find(v => v.playerId === playerId)?.extend,
+    myVote: room.votes.find((v) => v.voterId === playerId)?.targetId,
+    myExtendVote: room.extendVotes.find((v) => v.playerId === playerId)?.extend,
     categories: Object.keys(EXPANDED_WORD_BANK),
-  })
-})
+  });
+});
 
 // --- Heartbeat ---
-app.post('/api/rooms/:roomId/heartbeat', async (c) => {
-  const roomId = c.req.param('roomId')
-  const { playerId } = await c.req.json()
+app.post("/api/rooms/:roomId/heartbeat", async (c) => {
+  const roomId = c.req.param("roomId");
+  const { playerId } = await c.req.json();
 
-  const room = rooms.get(roomId)
-  if (!room) return c.json({ error: '방을 찾을 수 없습니다.' }, 404)
+  const room = rooms.get(roomId);
+  if (!room) return c.json({ error: "방을 찾을 수 없습니다." }, 404);
 
-  const player = room.players.find(p => p.id === playerId)
+  const player = room.players.find((p) => p.id === playerId);
   if (player) {
-    player.lastSeen = Date.now()
-    room.lastActivity = Date.now()
+    player.lastSeen = Date.now();
+    room.lastActivity = Date.now();
   }
 
-  return c.json({ success: true })
-})
+  return c.json({ success: true });
+});
 
 // ============================================================
 // Frontend - Single Page Application
 // ============================================================
-app.get('/', (c) => {
-  return c.html(getMainHTML())
-})
+app.get("/", (c) => {
+  return c.html(getMainHTML());
+});
+
+app.get("/deathnote", (c) => {
+  return c.html(getDeathNoteHTML());
+});
 
 function getMainHTML(): string {
   return `<!DOCTYPE html>
@@ -1458,6 +2392,28 @@ body {
   color: var(--slate-500);
   margin-top: 6px;
   font-weight: 400;
+}
+
+.logo-links {
+  margin-top: 18px;
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.logo-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.85);
+  color: white;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+  border: 1px solid rgba(148, 163, 184, 0.18);
 }
 
 .card {
@@ -2566,6 +3522,9 @@ input::placeholder { color: var(--slate-400); }
       <div class="logo-icon"><i class="fas fa-mask"></i></div>
       <div class="logo-title">시멈비 라이어게임</div>
       <div class="logo-subtitle">거짓말쟁이를 찾아라! 최대 10명과 함께하는 실시간 추리 게임</div>
+      <div class="logo-links">
+        <a class="logo-link-btn" href="/deathnote"><i class="fas fa-book-dead"></i> 데스노트 게임</a>
+      </div>
     </div>
 
     <div class="card" id="nickname-card">
@@ -3781,15 +4740,15 @@ function togglePlayerList() {
 setInterval(loadRooms, 5000);
 </script>
 </body>
-</html>`
+</html>`;
 }
 
-export default app
+export default app;
 
-const port = Number(process.env.PORT) || 3000
+const port = Number(process.env.PORT) || 3000;
 serve({
   fetch: app.fetch,
   port,
-})
+});
 
-console.log(`LiarGame server is running on port ${port}`)
+console.log(`LiarGame server is running on port ${port}`);
