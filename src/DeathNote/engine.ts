@@ -8,7 +8,6 @@ import {
   RESULT_IMAGES,
   ROLE_DEFINITIONS,
   ROLE_LABEL_TO_KEY,
-  START_IMAGE,
 } from "./constants.js";
 import { shuffleAndAssignRoles } from "./roleAssignment.js";
 import type {
@@ -1255,7 +1254,7 @@ function startGame(room: DNRoom) {
     sendPrivate(
       room,
       [assignment.playerId],
-      `당신의 역할은 ${assignment.role} 입니다.\\n\\n[보유 스킬]\\n${assignment.explain}\\n\\n[시작 이미지]\\n${START_IMAGE}`,
+      `당신의 역할은 ${assignment.role} 입니다.\\n\\n[보유 스킬]\\n${assignment.explain}`,
     );
   });
 
