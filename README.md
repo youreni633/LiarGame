@@ -4,7 +4,7 @@
 - Project: browser-based liar game server for Azure Web App
 - Stack: Hono + TypeScript + Node.js
 - Runtime: single Node server that serves both game API and SPA UI
-- Current deploy version: `v1.02`
+- Current deploy version: `v1.04`
 
 ## Run
 ```bash
@@ -43,16 +43,27 @@ npm run dev
 - The liar receives a similar word instead of the real word
 - The liar usually discovers the truth only later in the round result flow
 
-## Recent Changes In v1.02
+## Recent Changes In v1.04
 ### Game Mode
 - Added room-level game mode selection
 - Added `classic` and `fool` modes
 - Host can change game mode while the room is still in `waiting`
 
+### Room Control
+- Host can kick players before the game starts
+- Kick action is limited to the `waiting` phase
+
 ### Chat UI
 - Reduced duplicated speaking summary exposure
 - On mobile chat tab, speaking summary is hidden so chat stays primary
 - Increased bottom spacing in mobile chat area to reduce overlap with input/tab area
+- On mobile, the UI automatically switches back to the game tab when vote phases begin
+
+### Round Timeout
+- Speaking turns now auto-skip when the current speaker does not submit within the speaking time limit
+- Extend-vote and final-vote phases now auto-close after 60 seconds
+- Non-voters are treated as abstained, and current submitted votes are used to resolve the phase
+- Tie or empty final votes are resolved as liar survival
 
 ### Word Reveal Stability
 - Added defensive handling so the word area is less likely to appear blank on some phones
@@ -69,7 +80,7 @@ Example response:
 ```json
 {
   "ok": true,
-  "version": "v1.02",
+  "version": "v1.04",
   "timestamp": 1713340000000
 }
 ```
@@ -97,6 +108,7 @@ This is intended for Azure warm-up, availability checks, and verifying deployed 
 | POST | `/api/rooms/:id/new-game` | Reset to waiting state |
 | POST | `/api/rooms/:id/category` | Change category |
 | POST | `/api/rooms/:id/game-mode` | Change game mode |
+| POST | `/api/rooms/:id/kick` | Kick a player before game start |
 | GET | `/api/rooms/:id/state` | Poll room state |
 
 ## Azure Notes
