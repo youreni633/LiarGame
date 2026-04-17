@@ -2792,9 +2792,9 @@ function renderPlayers(players, room) {
     const initial = p.nickname.charAt(0);
     const roleText = p.id === state.playerId ? '(나)' : '';
     const canKick = room.phase === 'waiting' && isHost && !p.isHost && p.id !== state.playerId;
-    const safeNickname = esc(p.nickname).replace(/'/g, '\\\'');
+    const safeNickname = esc(p.nickname).replace(/"/g, '&quot;');
     const actionHtml = canKick
-      ? '<button class="player-kick-btn" onclick="kickPlayer(\'' + p.id + '\', \'' + safeNickname + '\')">강퇴</button>'
+      ? '<button class="player-kick-btn" data-player-id="' + p.id + '" data-player-nickname="' + safeNickname + '" onclick="kickPlayerFromButton(this)">강퇴</button>'
       : '';
 
     return \`
@@ -3459,6 +3459,13 @@ async function kickPlayer(targetId, nickname) {
     await api(\`/api/rooms/\${state.roomId}/kick\`, 'POST', { playerId: state.playerId, targetId });
     toast(nickname + '님을 강퇴했습니다.', 'success');
   } catch(e) {}
+}
+
+function kickPlayerFromButton(button) {
+  const targetId = button.getAttribute('data-player-id');
+  const nickname = button.getAttribute('data-player-nickname') || '';
+  if (!targetId) return;
+  kickPlayer(targetId, nickname);
 }
 
 // ===== MOBILE TAB SWITCHER =====
