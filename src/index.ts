@@ -490,6 +490,38 @@ app.post('/api/rooms/:roomId/leave', async (c) => {
   return c.json({ success: true })
 })
 
+// --- Kick Player (host only, waiting phase) ---
+app.post('/api/rooms/:roomId/kick', async (c) => {
+  const roomId = c.req.param('roomId')
+  const { playerId, targetId } = await c.req.json()
+
+  const room = rooms.get(roomId)
+  if (!room) return c.json({ error: '방을 찾을 수 없습니다.' }, 404)
+  if (room.hostId !== playerId) return c.json({ error: '방장만 플레이어를 강퇴할 수 있습니다.' }, 403)
+  if (room.phase !== 'waiting') return c.json({ error: '게임 시작 전 대기실에서만 강퇴할 수 있습니다.' }, 400)
+  if (playerId === targetId) return c.json({ error: '방장은 자기 자신을 강퇴할 수 없습니다.' }, 400)
+
+  const targetPlayer = room.players.find(p => p.id === targetId)
+  if (!targetPlayer) return c.json({ error: '플레이어를 찾을 수 없습니다.' }, 404)
+  if (targetPlayer.isHost) return c.json({ error: '방장은 강퇴할 수 없습니다.' }, 400)
+
+  room.players = room.players.filter(p => p.id !== targetId)
+  room.version++
+  room.lastActivity = Date.now()
+  playerSessions.delete(targetId)
+
+  room.messages.push({
+    id: generateId(),
+    playerId: 'system',
+    nickname: '시스템',
+    message: `${targetPlayer.nickname}님이 방에서 강퇴되었습니다.`,
+    timestamp: Date.now(),
+    type: 'system',
+  })
+
+  return c.json({ success: true })
+})
+
 // --- Toggle Ready ---
 app.post('/api/rooms/:roomId/ready', async (c) => {
   const roomId = c.req.param('roomId')
@@ -1488,6 +1520,28 @@ input::placeholder { color: var(--slate-400); }
 }
 .player-role { font-size: 11px; color: var(--slate-500); }
 
+.player-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.player-kick-btn {
+  border: none;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: white;
+  background: var(--red-500);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.player-kick-btn:hover {
+  background: var(--red-600);
+}
+
 .player-status {
   font-size: 11px;
   font-weight: 600;
@@ -2452,6 +2506,7 @@ let state = {
   pollInterval: null,
   version: 0,
   roomData: null,
+  lastPhase: null,
   wordRevealed: false,
   mobileTab: 'game', // 'game' or 'chat'
   chatUnread: false,
@@ -2656,6 +2711,7 @@ function stopPolling() {
 async function pollState() {
   if (!state.roomId) return;
   try {
+    const prevPhase = state.lastPhase;
     const data = await api(\`/api/rooms/\${state.roomId}/state?playerId=\${state.playerId}&v=\${state.version}\`);
     if (data.error) { leaveRoom(); return; }
     if (!data.changed) {
@@ -2664,6 +2720,12 @@ async function pollState() {
     }
     state.version = data.version;
     state.roomData = data;
+    state.lastPhase = data.room?.phase || null;
+    const focusPhases = ['vote_extend', 'final_vote'];
+    if (window.innerWidth <= 768 && focusPhases.includes(state.lastPhase) && state.lastPhase !== prevPhase) {
+      switchMobileTab('game');
+      toast('투표 단계가 시작되어 게임 화면으로 이동했습니다.', 'info');
+    }
     renderGameState(data);
   } catch(e) {
     console.error('Poll error:', e);
@@ -2707,6 +2769,7 @@ function renderGameState(data) {
 
 function renderPlayers(players, room) {
   const el = $('player-list');
+  const isHost = room.hostId === state.playerId;
   el.innerHTML = players.map((p, i) => {
     let classes = 'player-item';
     if (p.id === state.playerId) classes += ' is-me';
@@ -2728,6 +2791,11 @@ function renderPlayers(players, room) {
 
     const initial = p.nickname.charAt(0);
     const roleText = p.id === state.playerId ? '(나)' : '';
+    const canKick = room.phase === 'waiting' && isHost && !p.isHost && p.id !== state.playerId;
+    const safeNickname = esc(p.nickname).replace(/'/g, '\\\'');
+    const actionHtml = canKick
+      ? '<button class="player-kick-btn" onclick="kickPlayer(\'' + p.id + '\', \'' + safeNickname + '\')">강퇴</button>'
+      : '';
 
     return \`
       <div class="\${classes}">
@@ -2735,7 +2803,10 @@ function renderPlayers(players, room) {
         <div class="player-details">
           <div class="player-nick">\${esc(p.nickname)} \${roleText}</div>
         </div>
-        \${statusHtml}
+        <div class="player-actions">
+          \${statusHtml}
+          \${actionHtml}
+        </div>
       </div>
     \`;
   }).join('');
@@ -3379,6 +3450,14 @@ async function changeCategory(cat) {
 async function changeGameMode(gameMode) {
   try {
     await api(\`/api/rooms/\${state.roomId}/game-mode\`, 'POST', { playerId: state.playerId, gameMode });
+  } catch(e) {}
+}
+
+async function kickPlayer(targetId, nickname) {
+  if (!confirm(nickname + '님을 강퇴하시겠습니까?')) return;
+  try {
+    await api(\`/api/rooms/\${state.roomId}/kick\`, 'POST', { playerId: state.playerId, targetId });
+    toast(nickname + '님을 강퇴했습니다.', 'success');
   } catch(e) {}
 }
 
