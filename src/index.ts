@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 
+const APP_VERSION = 'v1.02'
+
 // ============================================================
 // 시멈비 라이어게임 - In-Memory Game State (Edge Worker)
 // ============================================================
@@ -32,6 +34,8 @@ type Vote = {
   targetId: string
 }
 
+type GameMode = 'classic' | 'fool'
+
 type GamePhase =
   | 'waiting'      // 대기실
   | 'word_reveal'  // 제시어 공개 (각자 확인)
@@ -50,6 +54,7 @@ type Room = {
   players: Player[]
   maxPlayers: number
   phase: GamePhase
+  gameMode: GameMode
   category: string
   realWord: string
   liarWord: string
@@ -327,7 +332,7 @@ const publicRoot = fileURLToPath(new URL('../public', import.meta.url))
 app.use('/static/*', serveStatic({ root: publicRoot }))
 
 // Lightweight health endpoint for warm-up / availability checks
-app.get('/health', (c) => c.json({ ok: true, timestamp: Date.now() }))
+app.get('/health', (c) => c.json({ ok: true, version: APP_VERSION, timestamp: Date.now() }))
 
 // --- Room List ---
 app.get('/api/rooms', (c) => {
@@ -348,7 +353,7 @@ app.get('/api/rooms', (c) => {
 // --- Create Room ---
 app.post('/api/rooms', async (c) => {
   const body = await c.req.json()
-  const { nickname, roomName, category, maxPlayers, speakingTimeLimit } = body
+  const { nickname, roomName, category, maxPlayers, speakingTimeLimit, gameMode } = body
 
   if (!nickname || !roomName) {
     return c.json({ error: '닉네임과 방 이름을 입력해주세요.' }, 400)
@@ -374,6 +379,7 @@ app.post('/api/rooms', async (c) => {
     players: [player],
     maxPlayers: Math.min(Math.max(maxPlayers || 4, 3), 10),
     phase: 'waiting',
+    gameMode: gameMode === 'fool' ? 'fool' : 'classic',
     category: category || '음식',
     realWord: '',
     liarWord: '',
@@ -529,8 +535,11 @@ app.post('/api/rooms/:roomId/start', async (c) => {
 
   // Assign words
   room.players.forEach(p => {
-    p.isLiar = p.id === liarPlayer.id
-    p.word = p.id === liarPlayer.id ? liarWord : realWord
+    const isLiar = p.id === liarPlayer.id
+    p.isLiar = isLiar
+    p.word = isLiar
+      ? (room.gameMode === 'classic' ? '???' : liarWord)
+      : realWord
     p.ready = false
   })
 
@@ -952,6 +961,22 @@ app.post('/api/rooms/:roomId/category', async (c) => {
   return c.json({ success: true })
 })
 
+// --- Change Game Mode ---
+app.post('/api/rooms/:roomId/game-mode', async (c) => {
+  const roomId = c.req.param('roomId')
+  const { playerId, gameMode } = await c.req.json()
+
+  const room = rooms.get(roomId)
+  if (!room) return c.json({ error: '방을 찾을 수 없습니다.' }, 404)
+  if (room.hostId !== playerId) return c.json({ error: '방장만 게임 모드를 변경할 수 있습니다.' }, 403)
+  if (room.phase !== 'waiting') return c.json({ error: '게임 중에는 변경할 수 없습니다.' }, 400)
+
+  room.gameMode = gameMode === 'fool' ? 'fool' : 'classic'
+  room.version++
+
+  return c.json({ success: true })
+})
+
 // --- Get Room State (Polling) ---
 app.get('/api/rooms/:roomId/state', (c) => {
   const roomId = c.req.param('roomId')
@@ -1003,6 +1028,11 @@ app.get('/api/rooms/:roomId/state', (c) => {
     })
   }
 
+  const shouldRevealLiarRole =
+    room.gameMode === 'classic' ||
+    room.phase === 'liar_guess' ||
+    room.phase === 'result'
+
   return c.json({
     changed: true,
     version: room.version,
@@ -1012,6 +1042,7 @@ app.get('/api/rooms/:roomId/state', (c) => {
       hostId: room.hostId,
       maxPlayers: room.maxPlayers,
       phase: room.phase,
+      gameMode: room.gameMode,
       category: room.category,
       roundNumber: room.roundNumber,
       speakingTimeLimit: room.speakingTimeLimit,
@@ -1032,7 +1063,7 @@ app.get('/api/rooms/:roomId/state', (c) => {
       liarGuess: room.phase === 'result' ? room.liarGuess : undefined,
     },
     myWord: player?.word || '',
-    isLiar: player?.isLiar || false,
+    isLiar: shouldRevealLiarRole ? (player?.isLiar || false) : false,
     players: room.players.map(p => ({
       id: p.id,
       nickname: p.nickname,
@@ -1539,6 +1570,9 @@ input::placeholder { color: var(--slate-400); }
   color: var(--slate-800);
   margin-bottom: 8px;
   letter-spacing: -0.5px;
+  min-height: 1.3em;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 
 .word-card-category {
@@ -2129,8 +2163,8 @@ input::placeholder { color: var(--slate-400); }
   .chat-section .chat-messages {
     flex: 1;
     max-height: none;
-    padding-top: 50px; /* space for header */
-    padding-bottom: 120px; /* space for input + tabs + action bar */
+    padding-top: 12px;
+    padding-bottom: 150px; /* space for input + tabs + action bar */
   }
   .chat-section .chat-input-area {
     position: fixed;
@@ -2141,6 +2175,7 @@ input::placeholder { color: var(--slate-400); }
     border-top: 1px solid var(--slate-100);
     z-index: 96;
   }
+  .chat-section #speaking-summary-container { display: none; }
   .chat-input-area input { padding: 8px 10px; font-size: 13px; }
   .chat-input-area button { padding: 8px 12px; font-size: 12px; }
 
@@ -2294,6 +2329,13 @@ input::placeholder { color: var(--slate-400); }
               <option value="영화/드라마">🎬 영화/드라마</option>
               <option value="스포츠">⚽ 스포츠</option>
               <option value="가전제품">📺 가전제품</option>
+            </select>
+          </div>
+          <div class="input-group">
+            <label class="input-label">게임 모드</label>
+            <select id="game-mode-select">
+              <option value="classic" selected>기본 라이어</option>
+              <option value="fool">바보 라이어</option>
             </select>
           </div>
           <div class="input-group">
@@ -2529,12 +2571,14 @@ if (state.nickname) {
 $('create-room-btn').onclick = async () => {
   const roomName = $('room-name-input').value.trim() || (state.nickname + '님의 방');
   const category = $('category-select').value;
+  const gameMode = $('game-mode-select').value;
   const maxPlayers = parseInt($('max-players-select').value);
   try {
     const data = await api('/api/rooms', 'POST', {
       nickname: state.nickname,
       roomName,
       category,
+      gameMode,
       maxPlayers,
     });
     state.roomId = data.roomId;
@@ -2777,6 +2821,7 @@ function renderMainContent(room, players, myWord, isLiar, myVote, myExtendVote, 
 
 function renderWaiting(el, room, players, categories) {
   const isHost = room.hostId === state.playerId;
+  const modeLabel = room.gameMode === 'fool' ? '바보 라이어' : '기본 라이어';
 
   el.innerHTML = \`
     <div class="waiting-area animate-in">
@@ -2787,6 +2832,9 @@ function renderWaiting(el, room, players, categories) {
           <span class="badge badge-blue" style="font-size:13px;padding:6px 14px">
             <i class="fas fa-tag"></i> \${esc(room.category)}
           </span>
+          <span class="badge badge-amber" style="font-size:13px;padding:6px 14px;margin-left:8px">
+            <i class="fas fa-masks-theater"></i> \${esc(modeLabel)}
+          </span>
         </div>
         \${isHost ? \`
         <div style="margin-top:20px">
@@ -2795,6 +2843,11 @@ function renderWaiting(el, room, players, categories) {
             \${(categories || []).map(c => \`
               <button class="category-chip \${c === room.category ? 'active' : ''}" onclick="changeCategory('\${c}')">\${esc(c)}</button>
             \`).join('')}
+          </div>
+          <div class="input-label" style="text-align:left;margin:16px 0 8px">게임 모드</div>
+          <div class="category-selector">
+            <button class="category-chip \${room.gameMode === 'classic' ? 'active' : ''}" onclick="changeGameMode('classic')">기본 라이어</button>
+            <button class="category-chip \${room.gameMode === 'fool' ? 'active' : ''}" onclick="changeGameMode('fool')">바보 라이어</button>
           </div>
         </div>\` : ''}
       </div>
@@ -2805,6 +2858,15 @@ function renderWaiting(el, room, players, categories) {
 function renderWordReveal(el, myWord, isLiar, room) {
   const me = state.roomData.players.find(p => p.id === state.playerId);
   const confirmed = me?.ready;
+  const displayWord = myWord && myWord.trim() ? myWord : '불러오는 중...';
+  const knowsLiarRole = room.gameMode !== 'fool' || isLiar;
+  const wordLabel = knowsLiarRole && isLiar ? '🎭 당신은 라이어입니다!' : '📋 당신의 제시어';
+  const wordStyle = knowsLiarRole && isLiar ? 'color:var(--red-500)' : '';
+  const liarHint = knowsLiarRole && isLiar
+    ? '<div class="word-card-hint" style="color:var(--red-400);margin-top:12px">⚠️ 다른 사람들과 다른 단어가 주어졌습니다. 들키지 마세요!</div>'
+    : room.gameMode === 'fool'
+      ? '<div class="word-card-hint" style="margin-top:12px">💡 주어진 단어를 기준으로 자연스럽게 플레이해보세요.</div>'
+      : '';
 
   if (state.wordRevealed || confirmed) {
     el.innerHTML = \`
@@ -2826,6 +2888,27 @@ function renderWordReveal(el, myWord, isLiar, room) {
         \`}
       </div>
     \`;
+
+    const labelEl = el.querySelector('.word-card-label');
+    if (labelEl) labelEl.textContent = wordLabel;
+
+    const wordEl = el.querySelector('.word-card-word');
+    if (wordEl) {
+      wordEl.textContent = displayWord;
+      wordEl.setAttribute('style', wordStyle);
+    }
+
+    const existingHintEl = el.querySelector('.word-card-hint');
+    if (liarHint) {
+      if (existingHintEl) {
+        existingHintEl.outerHTML = liarHint;
+      } else {
+        const cardEl = el.querySelector('.word-card.revealed');
+        if (cardEl) cardEl.insertAdjacentHTML('beforeend', liarHint);
+      }
+    } else if (existingHintEl) {
+      existingHintEl.remove();
+    }
   } else {
     el.innerHTML = \`
       <div class="word-reveal-card animate-in">
@@ -3146,6 +3229,8 @@ function renderChat(messages) {
 function renderSpeakingSummaryInChat(messages) {
   const container = $('speaking-summary-container');
   if (!container) return;
+  container.innerHTML = '';
+  return;
   if (!state.roomData) { container.innerHTML = ''; return; }
 
   const phase = state.roomData.room.phase;
@@ -3288,6 +3373,12 @@ async function newGame() {
 async function changeCategory(cat) {
   try {
     await api(\`/api/rooms/\${state.roomId}/category\`, 'POST', { playerId: state.playerId, category: cat });
+  } catch(e) {}
+}
+
+async function changeGameMode(gameMode) {
+  try {
+    await api(\`/api/rooms/\${state.roomId}/game-mode\`, 'POST', { playerId: state.playerId, gameMode });
   } catch(e) {}
 }
 

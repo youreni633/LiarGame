@@ -1,70 +1,105 @@
-# 시멈비 라이어게임
+# LiarGame Azure Server
 
-## 프로젝트 개요
-- **이름**: 시멈비 라이어게임
-- **목적**: 최대 10명이 한 세션에서 실시간으로 즐기는 채팅 기반 라이어 게임
-- **기술 스택**: Hono + TypeScript + Cloudflare Workers
+## Overview
+- Project: browser-based liar game server for Azure Web App
+- Stack: Hono + TypeScript + Node.js
+- Runtime: single Node server that serves both game API and SPA UI
+- Current deploy version: `v1.02`
 
-## 게임 규칙
+## Run
+```bash
+npm install
+npm run build
+npm start
+```
 
-### 기본 흐름
-1. **로비** - 닉네임을 만들고 게임방에 입장
-2. **대기실** - 모든 플레이어가 준비 완료하면 방장이 게임 시작
-3. **제시어 확인** - 각자 카드를 터치하여 제시어 확인 (라이어는 다른 단어를 받음)
-4. **1차 발언** - 랜덤 순서로 제시어에 대한 생각을 발언
-5. **자유 토론** - 3분간 채팅으로 자유 토론 (발언 요약 패널 제공)
-6. **추가 토론 투표** - 과반수 찬성시 2차 발언 진행
-7. **최종 투표** - 라이어를 지목 (발언 요약 참조 가능)
-8. **라이어 추측** - 지목당한 라이어가 정답 제시어를 맞추면 라이어 승리!
+Development mode:
+```bash
+npm run dev
+```
 
-### 승리 조건
-- **시민 승리**: 라이어를 지목하고, 라이어가 제시어를 못 맞춤
-- **라이어 승리**: 투표에서 지목 안 됨 OR 지목됐지만 제시어를 맞춤
+## Build And Output
+- Source entry: `src/index.ts`
+- Build output: `dist/index.js`
+- TypeScript config: `tsconfig.json`
 
-## 기능
+## Game Flow
+1. Create or join a room
+2. Wait until all players are ready
+3. Start game and reveal each player's word
+4. First speaking round
+5. Free chat
+6. Optional extend vote and second speaking round
+7. Final liar vote
+8. Liar guess or result reveal
 
-### 완료된 기능
-- [x] 닉네임 기반 입장 (회원가입 불필요)
-- [x] 게임방 생성 및 참가
-- [x] 7가지 카테고리 (음식, 동물, 장소, 직업, 영화/드라마, 스포츠, 가전제품)
-- [x] 실시간 상태 동기화 (1초 폴링)
-- [x] 랜덤 발언 순서
-- [x] 자유 토론 타이머 (3분)
-- [x] 추가 토론 투표 시스템
-- [x] 최종 라이어 투표
-- [x] 라이어 제시어 맞추기
-- [x] 게임 결과 (투표 결과 상세)
-- [x] 새 게임 시작 (방 유지)
-- [x] 방장 위임 (방장 퇴장시)
-- [x] 모바일 반응형 디자인
-- [x] 실시간 채팅
-- [x] 데스크탑 채팅 영역 드래그 리사이즈 (80px~600px)
-- [x] 모바일 게임/채팅 탭 전환 (미읽음 알림 포함)
-- [x] 투표/토론 시 발언 요약 패널 (게임 콘텐츠 상단 + 채팅 섹션 내)
+## Game Modes
+### Classic Liar
+- The liar is explicitly told they are the liar
+- The liar sees the word as `???`
 
-## API 엔드포인트
+### Fool Liar
+- The liar is not told they are the liar during word reveal
+- The liar receives a similar word instead of the real word
+- The liar usually discovers the truth only later in the round result flow
 
-| Method | Path | 설명 |
-|--------|------|------|
-| GET | `/` | 메인 페이지 (SPA) |
-| GET | `/api/rooms` | 방 목록 조회 |
-| POST | `/api/rooms` | 방 생성 |
-| POST | `/api/rooms/:id/join` | 방 참가 |
-| POST | `/api/rooms/:id/leave` | 방 퇴장 |
-| POST | `/api/rooms/:id/ready` | 준비 토글 |
-| POST | `/api/rooms/:id/start` | 게임 시작 (방장) |
-| POST | `/api/rooms/:id/confirm-word` | 제시어 확인 완료 |
-| POST | `/api/rooms/:id/speak` | 발언 제출 |
-| POST | `/api/rooms/:id/chat` | 채팅 전송 |
-| POST | `/api/rooms/:id/end-free-chat` | 자유 토론 종료 (방장) |
-| POST | `/api/rooms/:id/vote-extend` | 추가 토론 투표 |
-| POST | `/api/rooms/:id/vote` | 최종 투표 |
-| POST | `/api/rooms/:id/liar-guess` | 라이어 제시어 추측 |
-| POST | `/api/rooms/:id/new-game` | 새 게임 (방장) |
-| POST | `/api/rooms/:id/category` | 카테고리 변경 (방장) |
-| GET | `/api/rooms/:id/state` | 방 상태 폴링 |
+## Recent Changes In v1.02
+### Game Mode
+- Added room-level game mode selection
+- Added `classic` and `fool` modes
+- Host can change game mode while the room is still in `waiting`
 
-## 배포
-- **플랫폼**: Azure Cloud WebApp환경으로 컨버젼
-- **상태**: ✅ 개발 완료
-- **최종 업데이트**: 2026-04-16
+### Chat UI
+- Reduced duplicated speaking summary exposure
+- On mobile chat tab, speaking summary is hidden so chat stays primary
+- Increased bottom spacing in mobile chat area to reduce overlap with input/tab area
+
+### Word Reveal Stability
+- Added defensive handling so the word area is less likely to appear blank on some phones
+- Added minimum height and safer wrapping rules for the revealed word area
+- Kept fool mode role-hiding behavior while stabilizing displayed text
+
+## Health Check
+Health endpoint:
+```http
+GET /health
+```
+
+Example response:
+```json
+{
+  "ok": true,
+  "version": "v1.02",
+  "timestamp": 1713340000000
+}
+```
+
+This is intended for Azure warm-up, availability checks, and verifying deployed version.
+
+## Main API
+| Method | Path | Description |
+|---|---|---|
+| GET | `/` | Serve main SPA |
+| GET | `/health` | Health check with deploy version |
+| GET | `/api/rooms` | List rooms |
+| POST | `/api/rooms` | Create room |
+| POST | `/api/rooms/:id/join` | Join room |
+| POST | `/api/rooms/:id/leave` | Leave room |
+| POST | `/api/rooms/:id/ready` | Toggle ready |
+| POST | `/api/rooms/:id/start` | Start game |
+| POST | `/api/rooms/:id/confirm-word` | Confirm revealed word |
+| POST | `/api/rooms/:id/speak` | Submit speaking turn |
+| POST | `/api/rooms/:id/chat` | Send chat |
+| POST | `/api/rooms/:id/end-free-chat` | End free chat |
+| POST | `/api/rooms/:id/vote-extend` | Vote for extra round |
+| POST | `/api/rooms/:id/vote` | Final liar vote |
+| POST | `/api/rooms/:id/liar-guess` | Liar final guess |
+| POST | `/api/rooms/:id/new-game` | Reset to waiting state |
+| POST | `/api/rooms/:id/category` | Change category |
+| POST | `/api/rooms/:id/game-mode` | Change game mode |
+| GET | `/api/rooms/:id/state` | Poll room state |
+
+## Azure Notes
+- The server listens on `process.env.PORT`
+- Game state is stored in memory, so scale-out or restarts reset active rooms
+- For stable behavior, deploy as a single instance unless state storage is externalized
