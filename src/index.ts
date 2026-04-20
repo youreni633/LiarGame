@@ -1159,6 +1159,12 @@ function cleanupStaleRooms() {
   for (const [id, room] of rooms) {
     // Remove players not seen in 60 seconds
     room.players = room.players.filter((p) => now - p.lastSeen < 60000);
+    if (room.players.length > 0) {
+      room.lastActivity = Math.max(
+        room.lastActivity,
+        ...room.players.map((p) => p.lastSeen),
+      );
+    }
     // Remove room if empty or inactive for 10 minutes
     if (room.players.length === 0 || now - room.lastActivity > 600000) {
       rooms.delete(id);
@@ -2148,6 +2154,7 @@ app.get("/api/rooms/:roomId/state", (c) => {
   const player = room.players.find((p) => p.id === playerId);
   if (player) {
     player.lastSeen = Date.now();
+    room.lastActivity = Date.now();
   }
 
   // Auto-transition: free_chat timeout
@@ -3693,7 +3700,7 @@ const API = '';
 let state = {
   nickname: localStorage.getItem('liar_nickname') || '',
   playerId: localStorage.getItem('liar_playerId') || '',
-  roomId: null,
+  roomId: localStorage.getItem('liar_roomId') || null,
   pollInterval: null,
   version: 0,
   roomData: null,
@@ -3772,6 +3779,44 @@ function showScreen(id) {
   $(id).classList.add('active');
 }
 
+function syncLobbyIdentityUI() {
+  if (state.nickname) {
+    $('nickname-input').value = state.nickname;
+    hide($('nickname-card'));
+    show($('lobby-content'));
+  } else {
+    show($('nickname-card'));
+    hide($('lobby-content'));
+  }
+}
+
+function saveLiarSession() {
+  localStorage.setItem('liar_nickname', state.nickname || '');
+  localStorage.setItem('liar_playerId', state.playerId || '');
+  localStorage.setItem('liar_roomId', state.roomId || '');
+}
+
+function resetLiarGameSession(goToLobby = true) {
+  stopPolling();
+  state.roomId = null;
+  state.playerId = '';
+  state.version = 0;
+  state.roomData = null;
+  state.lastPhase = null;
+  state.renderedPhase = null;
+  state.wordRevealed = false;
+  state.mobileTab = 'game';
+  state.chatUnread = false;
+  lastMsgCount = 0;
+  clearDraftInputs();
+  saveLiarSession();
+  if (goToLobby) {
+    showScreen('lobby-screen');
+    syncLobbyIdentityUI();
+    loadRooms();
+  }
+}
+
 // ============================================================
 // LOBBY
 // ============================================================
@@ -3827,9 +3872,8 @@ $('set-nickname-btn').onclick = () => {
     return;
   }
   state.nickname = nick;
-  localStorage.setItem('liar_nickname', nick);
-  hide($('nickname-card'));
-  show($('lobby-content'));
+  saveLiarSession();
+  syncLobbyIdentityUI();
   loadRooms();
   toast(\`\${nick}님 환영합니다!\`, 'success');
 };
@@ -3838,6 +3882,7 @@ $('set-nickname-btn').onclick = () => {
 if (state.nickname) {
   $('nickname-input').value = state.nickname;
 }
+syncLobbyIdentityUI();
 hydrateCategorySelect();
 
 // Create room
@@ -3856,7 +3901,7 @@ $('create-room-btn').onclick = async () => {
     });
     state.roomId = data.roomId;
     state.playerId = data.playerId;
-    localStorage.setItem('liar_playerId', state.playerId);
+    saveLiarSession();
     enterGameScreen();
   } catch(e) { console.error(e); }
 };
@@ -3867,7 +3912,7 @@ async function joinRoom(roomId) {
     const data = await api(\`/api/rooms/\${roomId}/join\`, 'POST', { nickname: state.nickname });
     state.roomId = data.roomId;
     state.playerId = data.playerId;
-    localStorage.setItem('liar_playerId', state.playerId);
+    saveLiarSession();
     enterGameScreen();
   } catch(e) { console.error(e); }
 }
@@ -3879,6 +3924,7 @@ $('refresh-rooms-btn').onclick = loadRooms;
 // GAME ROOM
 // ============================================================
 function enterGameScreen() {
+  saveLiarSession();
   showScreen('game-screen');
   state.version = 0;
   state.renderedPhase = null;
@@ -3899,17 +3945,10 @@ function enterGameScreen() {
 }
 
 function leaveRoom() {
-  stopPolling();
   if (state.roomId && state.playerId) {
     api(\`/api/rooms/\${state.roomId}/leave\`, 'POST', { playerId: state.playerId }).catch(() => {});
   }
-  state.roomId = null;
-  state.version = 0;
-  state.roomData = null;
-  state.renderedPhase = null;
-  clearDraftInputs();
-  showScreen('lobby-screen');
-  loadRooms();
+  resetLiarGameSession(true);
 }
 
 $('leave-room-btn').onclick = () => {
@@ -3950,6 +3989,12 @@ async function pollState() {
     }
     renderGameState(data);
   } catch(e) {
+    const message = e && e.message ? String(e.message) : '';
+    if (message.includes('방을 찾을 수 없습니다') || message.includes('플레이어를 찾을 수 없습니다')) {
+      toast('방 연결이 끊어져 로비로 이동합니다.', 'error');
+      resetLiarGameSession(true);
+      return;
+    }
     console.error('Poll error:', e);
   }
 }
@@ -4860,6 +4905,12 @@ function togglePlayerList() {
 })();
 
 // ===== INIT =====
+if (state.roomId && state.playerId) {
+  enterGameScreen();
+} else if (state.nickname) {
+  loadRooms();
+}
+
 setInterval(loadRooms, 5000);
 </script>
 </body>
