@@ -167,7 +167,7 @@ function finalizeResult(room: DNRoom, victoryType: DNVictoryType, title: string,
   const resultSummary = [
     "**최종 결과를 안내드립니다**",
     ...room.assignments.map((assignment) => formatResult(assignment)),
-  ].join("\\n");
+  ].join("\n");
 
   const lAlive = !!findAliveAssignmentByRole(room, "L");
   const winningTeam =
@@ -302,12 +302,12 @@ function killPlayer(
 }
 
 function parseDirectedMessage(input: string) {
-  const [, target, ...rest] = input.trim().split(/\\s+/);
+  const [, target, ...rest] = input.trim().split(/\s+/);
   return { target, content: rest.join(" ").trim() };
 }
 
 function parseRoleNameCause(input: string) {
-  const [, roleLabel, playerName, ...causeParts] = input.trim().split(/\\s+/);
+  const [, roleLabel, playerName, ...causeParts] = input.trim().split(/\s+/);
   return {
     roleLabel,
     playerName,
@@ -343,7 +343,67 @@ function resolveWiretap(room: DNRoom, actor: DNAssignedRole, targetPlayerId: str
     });
 }
 
+const DN_WHISPER_COMMANDS = [
+  "/\uadd3\uc18d\ub9d0 ",
+  "/\uadd3 ",
+  "/r ",
+  "/\u3131 ",
+];
+const DN_NOTE_COMMAND = "/\ucabd\uc9c0 ";
+
 function processCommonCommand(room: DNRoom, actor: DNAssignedRole, text: string) {
+  if (DN_WHISPER_COMMANDS.some((command) => text.startsWith(command))) {
+    const { target, content } = parseDirectedMessage(text);
+    const targetAssignment = target ? findAssignmentByName(room, target) : null;
+    if (!targetAssignment || !content) {
+      sendPrivate(room, [actor.playerId], "[System] 사용법: /귓속말 [이름] [메시지]");
+      return true;
+    }
+    if (actor.whisper <= 0) {
+      sendPrivate(room, [actor.playerId], "[System] 귓속말 횟수가 없습니다.");
+      return true;
+    }
+    actor.whisper -= 1;
+
+    let whisperPrefix = "[귓속말] ???";
+    if (actor.key === "M" && targetAssignment.key === "N") {
+      whisperPrefix = "[귓속말] ???(오독오독)";
+    }
+    if (actor.key === "M" && targetAssignment.key === "Hal") {
+      whisperPrefix = `[귓속말-멜로] ${actor.name}`;
+    }
+
+    sendPrivate(
+      room,
+      [targetAssignment.playerId, actor.playerId],
+      `${whisperPrefix}: ${content}`,
+      actor.playerId,
+    );
+    resolveWiretap(room, actor, targetAssignment.playerId, content);
+    return true;
+  }
+
+  if (text.startsWith(DN_NOTE_COMMAND)) {
+    const { target, content } = parseDirectedMessage(text);
+    const targetAssignment = target ? findAssignmentByName(room, target) : null;
+    if (!targetAssignment || !content) {
+      sendPrivate(room, [actor.playerId], "[System] 사용법: /쪽지 [이름] [메시지]");
+      return true;
+    }
+    if (actor.note <= 0) {
+      sendPrivate(room, [actor.playerId], "[System] 쪽지 횟수가 없습니다.");
+      return true;
+    }
+    actor.note -= 1;
+    sendPrivate(
+      room,
+      [targetAssignment.playerId, actor.playerId],
+      `[쪽지] ${actor.name}: ${content}`,
+      actor.playerId,
+    );
+    resolveWiretap(room, actor, targetAssignment.playerId, content);
+    return true;
+  }
   if (text.startsWith("/귓속말 ")) {
     const { target, content } = parseDirectedMessage(text);
     const targetAssignment = target ? findAssignmentByName(room, target) : null;

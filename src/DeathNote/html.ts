@@ -381,6 +381,8 @@ export function getDeathNoteHTML() {
       .replaceAll('"', '&quot;')
       .replaceAll("'", '&#39;');
 
+    const normalizeDisplayText = (v) => String(v || '').replaceAll('\\n', '\n');
+
     const showLobby = () => {
       $('lobby-screen').classList.add('active');
       $('game-screen').classList.remove('active');
@@ -582,6 +584,73 @@ export function getDeathNoteHTML() {
           <img src="\${image}" alt="result" />
           <h3>\${escapeHtml(data.result.title)}</h3>
           <div class="status-text">\${escapeHtml(data.result.caption)}</div>
+          <div class="status-text">\${data.result.entries.map((entry) => escapeHtml(entry.role + ': ' + entry.name + ' - 결과: ' + entry.result)).join('<br/>')}</div>
+        \`;
+      } else {
+        resultBox.style.display = 'none';
+      }
+    }
+
+    function renderState(data) {
+      state.room = data.room;
+      $('room-title').textContent = data.room.name;
+      $('room-mode-badge').textContent = data.room.mode + ' 모드';
+      $('status-text').textContent = normalizeDisplayText(data.room.statusText || '');
+      $('feed-count').textContent = (data.messages || []).length + '개 로그';
+
+      const isHost = data.room.hostId === state.playerId;
+      $('start-btn').style.display = isHost && data.room.phase === 'lobby' ? 'inline-flex' : 'none';
+      $('change-mode-btn').style.display = isHost && data.room.phase === 'lobby' ? 'inline-flex' : 'none';
+
+      $('player-list').innerHTML = (data.players || []).map((player) => \`
+        <div class="player \${player.alive ? '' : 'dead'}">
+          <strong>\${escapeHtml(player.name)} \${player.id === state.playerId ? '(나)' : ''}</strong>
+          <div class="small">상태: \${escapeHtml(player.alive ? '생존' : player.deathreason)}</div>
+          \${player.revealedRole ? '<div class="small">역할: ' + escapeHtml(player.revealedRole) + '</div>' : ''}
+        </div>
+      \`).join('');
+
+      const myRole = data.myRole;
+      if (myRole) {
+        const shouldHideImage = myRole.hidden || myRole.mode === '텍스트';
+        $('role-image-wrap').style.display = shouldHideImage ? 'none' : 'block';
+        if (shouldHideImage || !myRole.img) {
+          $('role-image').removeAttribute('src');
+        } else {
+          $('role-image').src = myRole.img;
+        }
+
+        $('hero-title').textContent = myRole.hidden ? '바보 모드' : myRole.role + ' / ' + myRole.team;
+        $('hero-desc').textContent = myRole.hidden
+          ? '바보모드에서는 당신의 역할을 알려주지 않습니다.'
+          : normalizeDisplayText(myRole.explain)
+            + '\n\n공통 귓속말 명령: /귓속말 /귓 /r /ㄱ'
+            + '\n상태: ' + myRole.deathreason
+            + '\n귓속말: ' + myRole.whisper + '회 / 쪽지: ' + myRole.note + '회';
+      } else {
+        $('role-image-wrap').style.display = 'none';
+        $('role-image').removeAttribute('src');
+        $('hero-title').textContent = '역할 정보';
+        $('hero-desc').textContent = '게임이 시작되면 역할 정보가 이쪽에 작게 표시됩니다.';
+      }
+
+      $('commands').innerHTML = (data.availableCommands || []).map((command) => \`
+        <span class="command-chip" onclick="fillCommand('\${command.replace(/'/g, "\\\\'")}')">\${escapeHtml(command)}</span>
+      \`).join('');
+
+      $('messages').innerHTML = (data.messages || []).slice(-120).map((message) => \`
+        <div class="msg \${message.type === 'system' ? 'system' : ''}">\${escapeHtml(normalizeDisplayText(message.text))}</div>
+      \`).join('');
+      $('messages').scrollTop = $('messages').scrollHeight;
+
+      const resultBox = $('result-box');
+      if (data.result) {
+        const image = data.result.imageByPlayerId[state.playerId];
+        resultBox.style.display = 'block';
+        resultBox.innerHTML = \`
+          <img src="\${image}" alt="result" />
+          <h3>\${escapeHtml(data.result.title)}</h3>
+          <div class="status-text">\${escapeHtml(normalizeDisplayText(data.result.caption))}</div>
           <div class="status-text">\${data.result.entries.map((entry) => escapeHtml(entry.role + ': ' + entry.name + ' - 결과: ' + entry.result)).join('<br/>')}</div>
         \`;
       } else {

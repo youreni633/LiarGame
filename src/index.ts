@@ -3698,9 +3698,12 @@ let state = {
   version: 0,
   roomData: null,
   lastPhase: null,
+  renderedPhase: null,
   wordRevealed: false,
   mobileTab: 'game', // 'game' or 'chat'
   chatUnread: false,
+  speechDraft: '',
+  guessDraft: '',
 };
 
 const avatarColors = ['av-0','av-1','av-2','av-3','av-4','av-5','av-6','av-7','av-8','av-9'];
@@ -3878,9 +3881,11 @@ $('refresh-rooms-btn').onclick = loadRooms;
 function enterGameScreen() {
   showScreen('game-screen');
   state.version = 0;
+  state.renderedPhase = null;
   state.wordRevealed = false;
   state.mobileTab = 'game';
   state.chatUnread = false;
+  clearDraftInputs();
   // On mobile, start with game tab active
   if (window.innerWidth <= 768) {
     const list = $('player-list');
@@ -3901,6 +3906,8 @@ function leaveRoom() {
   state.roomId = null;
   state.version = 0;
   state.roomData = null;
+  state.renderedPhase = null;
+  clearDraftInputs();
   showScreen('lobby-screen');
   loadRooms();
 }
@@ -3950,8 +3957,74 @@ async function pollState() {
 // ============================================================
 // RENDER GAME STATE
 // ============================================================
+function captureActiveDraft() {
+  const active = document.activeElement;
+  if (!active || !(active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)) {
+    return null;
+  }
+  if (active.id !== 'speak-textarea' && active.id !== 'guess-input') {
+    return null;
+  }
+  return {
+    id: active.id,
+    start: active.selectionStart,
+    end: active.selectionEnd,
+  };
+}
+
+function captureDraftInputs() {
+  const speakTextarea = document.getElementById('speak-textarea');
+  if (speakTextarea instanceof HTMLTextAreaElement) {
+    state.speechDraft = speakTextarea.value;
+  }
+
+  const guessInput = document.getElementById('guess-input');
+  if (guessInput instanceof HTMLInputElement) {
+    state.guessDraft = guessInput.value;
+  }
+}
+
+function clearDraftInputs() {
+  state.speechDraft = '';
+  state.guessDraft = '';
+}
+
+function bindDraftInputs() {
+  const speakTextarea = document.getElementById('speak-textarea');
+  if (speakTextarea instanceof HTMLTextAreaElement) {
+    speakTextarea.value = state.speechDraft || '';
+    speakTextarea.oninput = (event) => {
+      state.speechDraft = event.target.value;
+    };
+  }
+
+  const guessInput = document.getElementById('guess-input');
+  if (guessInput instanceof HTMLInputElement) {
+    guessInput.value = state.guessDraft || '';
+    guessInput.oninput = (event) => {
+      state.guessDraft = event.target.value;
+    };
+  }
+}
+
+function restoreDraftFocus(activeDraft) {
+  if (!activeDraft) return;
+  const target = document.getElementById(activeDraft.id);
+  if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
+  target.focus({ preventScroll: true });
+  if (typeof activeDraft.start === 'number' && typeof activeDraft.end === 'number') {
+    target.setSelectionRange(activeDraft.start, activeDraft.end);
+  }
+}
+
 function renderGameState(data) {
   const { room, players, messages, myWord, isLiar, myVote, myExtendVote, categories } = data;
+  const activeDraft = captureActiveDraft();
+  captureDraftInputs();
+
+  if (state.renderedPhase && state.renderedPhase !== room.phase) {
+    clearDraftInputs();
+  }
 
   // Header
   $('game-room-name').textContent = room.name;
@@ -3974,6 +4047,9 @@ function renderGameState(data) {
 
   // Main content
   renderMainContent(room, players, myWord, isLiar, myVote, myExtendVote, categories);
+  bindDraftInputs();
+  restoreDraftFocus(activeDraft);
+  state.renderedPhase = room.phase;
 
   // Chat
   renderChat(messages);
@@ -4607,6 +4683,7 @@ async function startGame() {
   try {
     await api(\`/api/rooms/\${state.roomId}/start\`, 'POST', { playerId: state.playerId });
     state.wordRevealed = false;
+    clearDraftInputs();
   } catch(e) {}
 }
 
@@ -4617,6 +4694,7 @@ async function submitSpeech() {
   if (!msg) { toast('발언을 입력해주세요.', 'error'); return; }
   try {
     await api(\`/api/rooms/\${state.roomId}/speak\`, 'POST', { playerId: state.playerId, message: msg });
+    state.speechDraft = '';
   } catch(e) {}
 }
 
@@ -4645,6 +4723,7 @@ async function submitGuess() {
   if (!guess) { toast('제시어를 입력해주세요.', 'error'); return; }
   try {
     await api(\`/api/rooms/\${state.roomId}/liar-guess\`, 'POST', { playerId: state.playerId, guess });
+    state.guessDraft = '';
   } catch(e) {}
 }
 
@@ -4653,6 +4732,8 @@ async function newGame() {
     await api(\`/api/rooms/\${state.roomId}/new-game\`, 'POST', { playerId: state.playerId });
     state.wordRevealed = false;
     lastMsgCount = 0;
+    state.renderedPhase = null;
+    clearDraftInputs();
   } catch(e) {}
 }
 

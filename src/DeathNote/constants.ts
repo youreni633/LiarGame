@@ -192,6 +192,6 @@ export const ROLE_LABEL_TO_KEY: Record<string, DNRoleKey> = Object.fromEntries(
 ) as Record<string, DNRoleKey>;
 
 export const DEFAULT_COMMANDS = [
-  "/귓속말 [이름] [메시지]",
+  "/귓속말(/귓 /r /ㄱ) [이름] [메시지]",
   "/쪽지 [이름] [메시지]",
 ];
