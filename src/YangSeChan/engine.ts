@@ -225,6 +225,15 @@ function buildState(room: YSRoom, playerId: string, sinceVersion: number) {
   const me = getPlayer(room, playerId);
   const currentActorId = room.pendingTurn?.actorId || "";
   const currentTargetId = room.pendingTurn?.targetId || "";
+  const currentActor = currentActorId
+    ? room.players.find((player) => player.id === currentActorId)
+    : undefined;
+  const currentTarget = currentTargetId
+    ? room.players.find((player) => player.id === currentTargetId)
+    : undefined;
+  const submittedPromptCount = room.players.filter((player) =>
+    player.submittedPrompt.trim(),
+  ).length;
 
   return {
     changed: true,
@@ -238,8 +247,10 @@ function buildState(room: YSRoom, playerId: string, sinceVersion: number) {
       promptInputEndsAt: room.promptInputEndsAt,
       currentActorId,
       currentTargetId,
+      submittedPromptCount,
+      totalPromptPlayers: room.players.length,
       currentActorNickname:
-        room.players.find((player) => player.id === currentActorId)?.nickname || "",
+        currentActor?.nickname || "",
     },
     players: room.players.map((player) => ({
       id: player.id,
@@ -250,7 +261,9 @@ function buildState(room: YSRoom, playerId: string, sinceVersion: number) {
       isSpectator: player.isSpectator,
       rank: player.rank,
       receivedPrompt:
-        me?.isSpectator || room.phase === "lobby" ? player.receivedPrompt : undefined,
+        room.phase !== "lobby" && player.id !== playerId
+          ? player.receivedPrompt
+          : undefined,
     })),
     leaderboard: room.leaderboard,
     lastCompletedLeaderboard: room.lastCompletedLeaderboard,
@@ -266,7 +279,7 @@ function buildState(room: YSRoom, playerId: string, sinceVersion: number) {
           isSpectator: me.isSpectator,
           rank: me.rank,
           submittedPrompt: me.submittedPrompt,
-          receivedPrompt: me.receivedPrompt,
+          receivedPrompt: me.isSpectator ? me.receivedPrompt : "",
         }
       : null,
     canSubmitPrompt: room.phase === "prompt_input",
@@ -279,7 +292,17 @@ function buildState(room: YSRoom, playerId: string, sinceVersion: number) {
       room.phase === "turn" &&
       room.pendingTurn?.awaitingAnswer === true &&
       room.pendingTurn?.targetId === playerId,
-    pendingTurn: room.pendingTurn,
+    pendingTurn: room.pendingTurn
+      ? {
+          ...room.pendingTurn,
+          actorNickname: currentActor?.nickname || "",
+          actorPrompt:
+            currentActor && currentActor.id !== playerId
+              ? currentActor.receivedPrompt
+              : "",
+          targetNickname: currentTarget?.nickname || "",
+        }
+      : null,
   };
 }
 
@@ -474,16 +497,27 @@ export function registerYangSeChanRoutes(app: Hono) {
     const body = await c.req.json();
     const player = getPlayer(room, String(body.playerId || ""));
     if (!player) return c.json({ error: "플레이어를 찾을 수 없습니다." }, 404);
+    if (player.submittedPrompt.trim()) {
+      return c.json({ success: true, submitted: true });
+    }
     const prompt = String(body.prompt || "").trim();
     if (!prompt) return c.json({ error: "제시어를 입력해주세요." }, 400);
     player.submittedPrompt = prompt;
+    const submittedPromptCount = room.players.filter((item) =>
+      item.submittedPrompt.trim(),
+    ).length;
     updateStatus(room, `${player.nickname}님이 제시어를 입력했습니다.`);
+
+    updateStatus(
+      room,
+      `${player.nickname}님이 제시어를 제출했습니다. (${submittedPromptCount}/${room.players.length})`,
+    );
 
     if (room.players.every((item) => item.submittedPrompt.trim())) {
       finalizePromptPhase(room);
     }
 
-    return c.json({ success: true });
+    return c.json({ success: true, submitted: true });
   });
 
   app.post("/api/yangsechan/rooms/:roomId/question", async (c) => {

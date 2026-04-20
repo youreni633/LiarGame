@@ -166,6 +166,48 @@ export function getYangSeChanHTML() {
       background: rgba(15, 23, 42, 0.8);
       border: 1px solid rgba(148, 163, 184, 0.14);
     }
+    .chat-lines {
+      max-height: 48vh;
+      overflow: auto;
+      margin-bottom: 14px;
+      padding-right: 4px;
+    }
+    .chat-line {
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+      color: #e2e8f0;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .chat-line:last-child { border-bottom: none; }
+    .chat-line strong { color: #93c5fd; }
+    .prompt-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(34, 197, 94, 0.14);
+      border: 1px solid rgba(34, 197, 94, 0.22);
+      color: #dcfce7;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .prompt-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .prompt-row {
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: rgba(15, 23, 42, 0.72);
+      border: 1px solid rgba(148, 163, 184, 0.12);
+      font-size: 13px;
+      line-height: 1.5;
+    }
     .player.dead { opacity: 0.56; }
     .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .action-note { color: #94a3b8; font-size: 13px; line-height: 1.7; margin-bottom: 12px; }
@@ -264,7 +306,7 @@ export function getYangSeChanHTML() {
       <div class="panel chat-panel">
         <div class="block">
           <h3>채팅</h3>
-          <div id="chat-messages" class="messages"></div>
+          <div id="chat-messages" class="chat-lines"></div>
           <textarea id="chat-input" placeholder="자유롭게 채팅을 입력하세요."></textarea>
           <div style="margin-top:12px;">
             <button id="chat-send-btn" type="button">채팅 전송</button>
@@ -587,6 +629,129 @@ export function getYangSeChanHTML() {
         } else {
           html = \`
             <div class="action-note">현재 <strong>\${escapeHtml(room.currentActorNickname || '')}</strong>님의 턴입니다. 질문 또는 답변이 끝날 때까지 대기하세요.<br/>내 제시어: <strong>\${escapeHtml(me?.receivedPrompt || '')}</strong></div>
+          \`;
+        }
+      }
+
+      $('game-panel-content').innerHTML = html;
+    }
+
+    async function submitPrompt() {
+      const promptInput = $('prompt-input');
+      if (!promptInput || promptInput.disabled) return;
+      const prompt = promptInput.value.trim();
+      if (!prompt) {
+        alert('제시어를 입력해주세요.');
+        return;
+      }
+      await api('/api/yangsechan/rooms/' + state.roomId + '/prompt', {
+        method: 'POST',
+        body: JSON.stringify({ playerId: state.playerId, prompt }),
+      });
+      await pollState();
+    }
+
+    function renderLobbyActions(data) {
+      const me = data.myState;
+      const isHost = data.room.hostId === state.playerId;
+      $('ready-btn').style.display = data.room.phase === 'lobby' && !isHost ? 'inline-flex' : 'none';
+      $('start-btn').style.display = data.room.phase === 'lobby' && isHost ? 'inline-flex' : 'none';
+      $('ready-btn').textContent = me?.ready ? '준비 해제' : '준비';
+    }
+
+    function renderPlayers(data) {
+      $('player-list').innerHTML = (data.players || []).map((player) => \`
+        <div class="player \${player.isSpectator ? 'dead' : ''}">
+          <strong>\${escapeHtml(player.nickname)} \${player.id === state.playerId ? '(나)' : ''}</strong>
+          <div class="small">\${player.isHost ? '방장' : player.ready ? '준비 완료' : '준비 전'}</div>
+          <div class="small">\${player.isSpectator ? '관전자' : player.isPlaying ? '플레이 중' : '대기'}</div>
+          \${player.rank ? '<div class="small">' + player.rank + '위</div>' : ''}
+          \${player.receivedPrompt ? '<div class="prompt-row">' + escapeHtml(player.nickname) + ' - 제시어: <strong>' + escapeHtml(player.receivedPrompt) + '</strong></div>' : ''}
+        </div>
+      \`).join('');
+    }
+
+    function renderLeaderboard(data) {
+      const list = data.leaderboard?.length ? data.leaderboard : data.lastCompletedLeaderboard || [];
+      $('leaderboard').innerHTML = list.length
+        ? list.map((name, index) => \`<div class="leader-item"><strong>\${index + 1}위</strong><div class="small">\${escapeHtml(name)}</div></div>\`).join('')
+        : '<div class="small">아직 정답을 맞힌 플레이어가 없습니다.</div>';
+    }
+
+    function renderMessages(data) {
+      $('game-messages').innerHTML = (data.gameMessages || []).map((message) => \`
+        <div class="msg \${message.type === 'system' ? 'system' : ''}">\${escapeHtml(message.text)}</div>
+      \`).join('');
+      $('chat-messages').innerHTML = (data.chatMessages || []).map((message) => \`
+        <div class="chat-line"><strong>\${escapeHtml(message.nickname)}</strong>: \${escapeHtml(message.text)}</div>
+      \`).join('');
+      $('game-messages').scrollTop = $('game-messages').scrollHeight;
+      $('chat-messages').scrollTop = $('chat-messages').scrollHeight;
+    }
+
+    function renderPromptOverview(data) {
+      const promptRows = (data.players || [])
+        .filter((player) => player.receivedPrompt)
+        .map((player) => \`<div class="prompt-row">\${escapeHtml(player.nickname)} - 제시어: <strong>\${escapeHtml(player.receivedPrompt)}</strong></div>\`)
+        .join('');
+      return promptRows ? '<div class="prompt-list">' + promptRows + '</div>' : '';
+    }
+
+    function renderGameArea(data) {
+      const room = data.room;
+      const me = data.myState;
+      const submittedPrompt = (me?.submittedPrompt || '').trim();
+      const promptOverview = renderPromptOverview(data);
+      let html = '';
+
+      if (room.phase === 'lobby') {
+        html = '<div class="action-note">현재는 로비입니다. 모두 준비를 누르면 방장이 게임을 시작할 수 있습니다.</div>';
+      } else if (room.phase === 'prompt_input') {
+        const remainSeconds = Math.max(0, Math.floor((room.promptInputEndsAt - Date.now()) / 1000));
+        const hasSubmitted = !!submittedPrompt;
+        html = \`
+          <div class="action-note">3분 안에 제시어를 입력하세요. 입력하지 않으면 기본 단어풀에서 자동 배정됩니다.</div>
+          <div class="small" style="margin-bottom:10px;">남은 시간: \${remainSeconds}초 / 제출 완료: \${room.submittedPromptCount || 0}/\${room.totalPromptPlayers || 0}</div>
+          \${hasSubmitted ? '<div class="prompt-status">제시어 제출 완료</div>' : ''}
+          <textarea id="prompt-input" placeholder="내가 제시할 단어를 입력하세요." \${hasSubmitted ? 'disabled' : ''}>\${escapeHtml(submittedPrompt)}</textarea>
+          <div style="margin-top:12px;"><button type="button" onclick="submitPrompt()" \${hasSubmitted ? 'disabled' : ''}>\${hasSubmitted ? '제출 완료' : '제시어 제출'}</button></div>
+        \`;
+      } else if (room.phase === 'turn') {
+        if (data.canAskQuestion) {
+          const targets = (data.players || []).filter((player) => player.id !== state.playerId && player.isPlaying);
+          html = \`
+            <div class="action-note">다른 사람들의 제시어를 보고 내 제시어를 유추해보세요. 질문 대상을 선택하고 질문하거나 정답 시도를 진행할 수 있습니다.</div>
+            \${promptOverview}
+            <div class="target-list">
+              \${targets.map((player) => \`<button type="button" class="target-btn \${state.selectedTargetId === player.id ? 'active' : ''}" onclick="selectTarget('\${player.id}')">\${escapeHtml(player.nickname)}\${player.receivedPrompt ? ' - ' + escapeHtml(player.receivedPrompt) : ''}</button>\`).join('')}
+            </div>
+            <textarea id="question-input" placeholder="질문을 입력하세요."></textarea>
+            <div class="row-2" style="margin-top:12px;">
+              <button type="button" onclick="submitQuestion()">질문 전송</button>
+              <button type="button" class="warning" onclick="toggleGuessBox()">정답 시도</button>
+            </div>
+            <div id="guess-box" style="display:none;margin-top:12px;">
+              <input id="guess-input" placeholder="내 제시어라고 생각하는 단어를 입력하세요." />
+              <div style="margin-top:10px;"><button type="button" class="warning" onclick="submitGuess()">정답 제출</button></div>
+            </div>
+          \`;
+        } else if (data.canAnswerQuestion) {
+          html = \`
+            <div class="action-note">질문을 받은 상태입니다. 질문자의 이름과 제시어를 확인한 뒤 답변을 입력하세요.</div>
+            \${promptOverview}
+            <div class="msg system" style="margin-bottom:12px;"><strong>\${escapeHtml(data.pendingTurn?.actorNickname || '')}</strong> (제시어: \${escapeHtml(data.pendingTurn?.actorPrompt || '') || '비공개'})<br/>\${escapeHtml(data.pendingTurn?.question || '')}</div>
+            <textarea id="answer-input" placeholder="답변을 입력하세요."></textarea>
+            <div style="margin-top:12px;"><button type="button" onclick="submitAnswer()">답변 전송</button></div>
+          \`;
+        } else if (me?.isSpectator) {
+          html = \`
+            <div class="action-note">관전 중입니다. 질문/답변에는 개입할 수 없고, 현황에서 다른 플레이어 제시어와 순위를 볼 수 있습니다.</div>
+            \${promptOverview}
+          \`;
+        } else {
+          html = \`
+            <div class="action-note">현재 <strong>\${escapeHtml(room.currentActorNickname || '')}</strong>님의 턴입니다. 질문 또는 답변이 끝날 때까지 기다려주세요.</div>
+            \${promptOverview}
           \`;
         }
       }

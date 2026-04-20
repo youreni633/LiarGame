@@ -1166,6 +1166,13 @@ function cleanupStaleRooms() {
   }
 }
 
+function normalizeLiarCategory(category: string | undefined): string {
+  if (category && EXPANDED_WORD_BANK[category]) {
+    return category;
+  }
+  return "음식";
+}
+
 function getRandomWord(category: string): {
   realWord: string;
   liarWord: string;
@@ -1470,6 +1477,7 @@ app.post("/api/rooms", async (c) => {
     lastActivity: Date.now(),
     version: 1,
   };
+  room.category = normalizeLiarCategory(category);
 
   rooms.set(roomId, room);
   playerSessions.set(playerId, { roomId, playerId, nickname });
@@ -2103,7 +2111,7 @@ app.post("/api/rooms/:roomId/category", async (c) => {
   if (room.phase !== "waiting")
     return c.json({ error: "게임 중에는 변경할 수 없습니다." }, 400);
 
-  room.category = category;
+  room.category = normalizeLiarCategory(category);
   room.version++;
 
   return c.json({ success: true });
@@ -2218,7 +2226,7 @@ app.get("/api/rooms/:roomId/state", (c) => {
       maxPlayers: room.maxPlayers,
       phase: room.phase,
       gameMode: room.gameMode,
-      category: room.category,
+      category: normalizeLiarCategory(room.category),
       roundNumber: room.roundNumber,
       speakingTimeLimit: room.speakingTimeLimit,
       freeChatDuration: room.freeChatDuration,
@@ -3696,10 +3704,33 @@ let state = {
 };
 
 const avatarColors = ['av-0','av-1','av-2','av-3','av-4','av-5','av-6','av-7','av-8','av-9'];
+const LIAR_CATEGORY_OPTIONS = [
+  '음식',
+  '동물',
+  '장소',
+  '직업',
+  '영화/드라마',
+  '스포츠',
+  '가전제품',
+  '교통수단',
+  '학교용품',
+  '의류/패션',
+  '자연/날씨',
+  '게임/취미',
+];
 
 function $(id) { return document.getElementById(id); }
 function show(el) { el.style.display = ''; }
 function hide(el) { el.style.display = 'none'; }
+
+function hydrateCategorySelect() {
+  const select = $('category-select');
+  if (!select) return;
+  select.innerHTML = LIAR_CATEGORY_OPTIONS
+    .map((category) => '<option value=\"' + category + '\">' + category + '</option>')
+    .join('');
+  select.value = '음식';
+}
 
 // ============================================================
 // TOAST
@@ -3804,6 +3835,7 @@ $('set-nickname-btn').onclick = () => {
 if (state.nickname) {
   $('nickname-input').value = state.nickname;
 }
+hydrateCategorySelect();
 
 // Create room
 $('create-room-btn').onclick = async () => {

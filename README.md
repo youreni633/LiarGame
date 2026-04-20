@@ -4,7 +4,7 @@
 - Project: browser-based liar game server for Azure Web App
 - Stack: Hono + TypeScript + Node.js
 - Runtime: single Node server that serves both game API and SPA UI
-- Current deploy version: `ver2.0`
+- Current deploy version: `Ver3.01`
 
 ## Run
 ```bash
@@ -43,7 +43,17 @@ npm run dev
 - The liar receives a similar word instead of the real word
 - The liar usually discovers the truth only later in the round result flow
 
-## Recent Changes In ver2.0
+## Recent Changes In Ver3.01
+### YangSeChan Game
+- Added a fully separated YangSeChan game module under `src/YangSeChan/`
+- Added dedicated routes: `/yangsechan` and `/api/yangsechan/*`
+- Added lobby ready/start flow, timed prompt input, derangement prompt redistribution, turn-based question/answer flow, spectator conversion, and leaderboard reset flow
+- Split YangSeChan into game/chat/status tabs for mobile use
+- Changed YangSeChan chat tab to dense text-style lines so more conversation stays visible
+- After prompt submission, the UI now changes to a submitted-complete state instead of looking idle
+- During the main turn, the current player no longer sees their own target prompt; instead, other players' prompts are shown in the status/game views
+- Answering players now see the questioner's nickname and prompt together in the answer panel
+
 ### DeathNote Game
 - Added a fully separated DeathNote game module under `src/DeathNote/`
 - Added dedicated routes: `/deathnote` and `/api/deathnote/*`
@@ -86,7 +96,7 @@ Example response:
 ```json
 {
   "ok": true,
-  "version": "ver2.0",
+  "version": "Ver3.01",
   "timestamp": 1713340000000
 }
 ```
@@ -125,6 +135,19 @@ This is intended for Azure warm-up, availability checks, and verifying deployed 
 | POST | `/api/deathnote/rooms/:id/start` | Start DeathNote game |
 | GET | `/api/deathnote/rooms/:id/state` | Poll DeathNote room state |
 | POST | `/api/deathnote/rooms/:id/chat` | Send DeathNote chat or command |
+| GET | `/yangsechan` | Serve YangSeChan game page |
+| GET | `/api/yangsechan/rooms` | List YangSeChan rooms |
+| POST | `/api/yangsechan/rooms` | Create YangSeChan room |
+| POST | `/api/yangsechan/rooms/:id/join` | Join YangSeChan room |
+| POST | `/api/yangsechan/rooms/:id/leave` | Leave YangSeChan room |
+| POST | `/api/yangsechan/rooms/:id/ready` | Toggle YangSeChan ready |
+| POST | `/api/yangsechan/rooms/:id/start` | Start YangSeChan game |
+| POST | `/api/yangsechan/rooms/:id/prompt` | Submit YangSeChan prompt |
+| POST | `/api/yangsechan/rooms/:id/question` | Send YangSeChan question |
+| POST | `/api/yangsechan/rooms/:id/answer` | Submit YangSeChan answer |
+| POST | `/api/yangsechan/rooms/:id/guess` | Attempt YangSeChan answer |
+| POST | `/api/yangsechan/rooms/:id/chat` | Send YangSeChan free chat |
+| GET | `/api/yangsechan/rooms/:id/state` | Poll YangSeChan room state |
 
 ## Azure Notes
 - The server listens on `process.env.PORT`
