@@ -591,10 +591,20 @@ export function getDeathNoteHTML() {
 
     async function pollState() {
       if (!state.roomId || !state.playerId) return;
-      const data = await api('/api/deathnote/rooms/' + state.roomId + '/state?playerId=' + encodeURIComponent(state.playerId) + '&v=' + state.version);
-      if (!data.changed) return;
-      state.version = data.version;
-      renderState(data);
+      try {
+        const data = await api('/api/deathnote/rooms/' + state.roomId + '/state?playerId=' + encodeURIComponent(state.playerId) + '&v=' + state.version);
+        if (!data.changed) return;
+        state.version = data.version;
+        renderState(data);
+      } catch (error) {
+        if (state.poll) clearInterval(state.poll);
+        state.roomId = '';
+        state.playerId = '';
+        state.version = 0;
+        saveIdentity();
+        showLobby();
+        loadRooms();
+      }
     }
 
     function startPolling() {
