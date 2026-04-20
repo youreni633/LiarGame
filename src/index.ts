@@ -14,6 +14,10 @@ import {
   getDeathNoteHTML,
   registerDeathNoteRoutes,
 } from "./DeathNote/index.js";
+import {
+  getYangSeChanHTML,
+  registerYangSeChanRoutes,
+} from "./YangSeChan/index.js";
 import type {
   ChatMessage,
   GameMode,
@@ -1383,6 +1387,7 @@ function resolveFinalVote(room: Room, timedOut = false) {
 const app = new Hono();
 app.use("/api/*", cors());
 registerDeathNoteRoutes(app);
+registerYangSeChanRoutes(app);
 
 // Static assets for Azure App Service / Node.js runtime
 const publicRoot = fileURLToPath(new URL("../public", import.meta.url));
@@ -2280,6 +2285,10 @@ app.get("/", (c) => {
 
 app.get("/deathnote", (c) => {
   return c.html(getDeathNoteHTML());
+});
+
+app.get("/yangsechan", (c) => {
+  return c.html(getYangSeChanHTML());
 });
 
 function getMainHTML(): string {
@@ -3524,6 +3533,7 @@ input::placeholder { color: var(--slate-400); }
       <div class="logo-subtitle">거짓말쟁이를 찾아라! 최대 10명과 함께하는 실시간 추리 게임</div>
       <div class="logo-links">
         <a class="logo-link-btn" href="/deathnote"><i class="fas fa-book-dead"></i> 데스노트 게임</a>
+        <a class="logo-link-btn" href="/yangsechan"><i class="fas fa-comments"></i> 양세찬 게임</a>
       </div>
     </div>
 
