@@ -18,6 +18,10 @@ import {
   getYangSeChanHTML,
   registerYangSeChanRoutes,
 } from "./YangSeChan/index.js";
+import {
+  getForbiddenWordHTML,
+  registerForbiddenWordRoutes,
+} from "./ForbiddenWord/index.js";
 import type {
   ChatMessage,
   GameMode,
@@ -1401,6 +1405,7 @@ const app = new Hono();
 app.use("/api/*", cors());
 registerDeathNoteRoutes(app);
 registerYangSeChanRoutes(app);
+registerForbiddenWordRoutes(app);
 
 // Static assets for Azure App Service / Node.js runtime
 const publicRoot = fileURLToPath(new URL("../public", import.meta.url));
@@ -2304,6 +2309,10 @@ app.get("/deathnote", (c) => {
 
 app.get("/yangsechan", (c) => {
   return c.html(getYangSeChanHTML());
+});
+
+app.get("/forbidden-word", (c) => {
+  return c.html(getForbiddenWordHTML());
 });
 
 function getMainHTML(): string {
@@ -3549,6 +3558,7 @@ input::placeholder { color: var(--slate-400); }
       <div class="logo-links">
         <a class="logo-link-btn" href="/deathnote"><i class="fas fa-book-dead"></i> 데스노트 게임</a>
         <a class="logo-link-btn" href="/yangsechan"><i class="fas fa-comments"></i> 양세찬 게임</a>
+        <a class="logo-link-btn" href="/forbidden-word"><i class="fas fa-ban"></i> 금지어 게임</a>
       </div>
     </div>
 
