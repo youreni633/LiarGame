@@ -279,10 +279,10 @@ export function getForbiddenWordHTML() {
           <h3>채팅 탭</h3>
           <div class="action-note">채팅은 Enter 키로 바로 전송됩니다. 탈락한 플레이어는 관전만 가능합니다.</div>
           <div id="chat-messages" class="messages"></div>
-          <div class="chat-input-row">
+          <form id="chat-form" class="chat-input-row">
             <input id="chat-input" placeholder="메시지를 입력하세요" />
-            <button id="send-btn">전송</button>
-          </div>
+            <button id="send-btn" type="submit">전송</button>
+          </form>
         </div>
       </section>
 
@@ -629,9 +629,12 @@ export function getForbiddenWordHTML() {
     $('leave-btn').onclick = leaveRoom;
     $('ready-btn').onclick = toggleReady;
     $('start-btn').onclick = startGame;
-    $('send-btn').onclick = sendChat;
+    $('chat-form').addEventListener('submit', (event) => {
+      event.preventDefault();
+      sendChat();
+    });
     $('chat-input').addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') {
+      if (event.key === 'Enter' && !event.isComposing) {
         event.preventDefault();
         sendChat();
       }
