@@ -204,15 +204,20 @@ function resetRoomToLobby(room: FWRoom) {
 
 function finishGameIfNeeded(room: FWRoom) {
   const alivePlayers = getAlivePlayers(room);
-  if (alivePlayers.length > 1) return;
+  const eliminatedCount = room.players.length - alivePlayers.length;
+  const majorityEliminated = eliminatedCount >= Math.ceil(room.players.length / 2);
+  if (alivePlayers.length > 1 && !majorityEliminated) return;
 
-  const winner = alivePlayers[0];
+  const winnerNames = alivePlayers.map((player) => player.nickname);
   const result: FWResult = {
-    winnerId: winner?.id || "",
-    winnerNickname: winner?.nickname || "승자 없음",
-    caption: winner
-      ? `최후의 1인 ${winner.nickname} 님이 승리했습니다!`
-      : "모든 플레이어가 탈락하여 승자가 없습니다.",
+    winnerIds: alivePlayers.map((player) => player.id),
+    winnerNicknames: winnerNames,
+    caption:
+      alivePlayers.length === 0
+        ? "모든 플레이어가 탈락하여 승자가 없습니다."
+        : alivePlayers.length === 1
+          ? `최후의 1인 ${winnerNames[0]} 님이 승리했습니다!`
+          : `과반수가 탈락하여 생존자 ${winnerNames.join(", ")} 님이 공동 승리했습니다!`,
   };
   room.phase = "result";
   room.result = result;
@@ -498,6 +503,9 @@ export function registerForbiddenWordRoutes(app: Hono) {
 
     const word = String(body.word || "").trim();
     if (!word) return c.json({ error: "금지어를 입력해주세요." }, 400);
+    if (word.length < 2) {
+      return c.json({ error: "금지어는 두 글자 이상이어야 합니다." }, 400);
+    }
     player.submittedWord = word;
     updateStatus(
       room,

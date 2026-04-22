@@ -23,8 +23,8 @@ export type FWChatMessage = {
 };
 
 export type FWResult = {
-  winnerId: string;
-  winnerNickname: string;
+  winnerIds: string[];
+  winnerNicknames: string[];
   caption: string;
 };
 

@@ -156,13 +156,13 @@ export function getForbiddenWordHTML() {
       max-height: 56vh;
       overflow: auto;
       margin-bottom: 14px;
-      padding-right: 4px;
+      padding-right: 2px;
     }
     .chat-line {
-      padding: 7px 0;
-      border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+      padding: 3px 0;
       color: #e2e8f0;
-      line-height: 1.6;
+      line-height: 1.45;
+      font-size: 13px;
       white-space: pre-wrap;
       word-break: break-word;
     }
@@ -463,6 +463,10 @@ export function getForbiddenWordHTML() {
       const input = $('assignment-word');
       const word = input.value.trim();
       if (!word) return;
+      if (word.length < 2) {
+        alert('금지어는 두 글자 이상으로 입력해주세요.');
+        return;
+      }
       await api('/api/forbidden-word/rooms/' + state.roomId + '/word', {
         method: 'POST',
         body: JSON.stringify({ playerId: state.playerId, word }),
@@ -514,7 +518,7 @@ export function getForbiddenWordHTML() {
             : \`
               <label class="label" style="margin-top:14px;">금지어 입력</label>
               <div style="display:grid;gap:10px;">
-                <input id="assignment-word" placeholder="타겟이 절대 말하면 안 되는 단어를 입력하세요" />
+                <input id="assignment-word" placeholder="타겟이 절대 말하면 안 되는 단어를 입력하세요 (두 글자 이상)" />
                 <button onclick="submitWord()">금지어 제출</button>
               </div>
             \`}
@@ -585,6 +589,23 @@ export function getForbiddenWordHTML() {
       $('chat-input').placeholder = canChat
         ? '메시지를 입력하고 Enter를 누르세요'
         : '탈락한 플레이어는 관전만 가능합니다';
+    }
+
+    function renderLeaderboard(players, room) {
+      const items = (players || [])
+        .filter((player) => !player.isAlive)
+        .sort((a, b) => (a.eliminatedOrder || 999) - (b.eliminatedOrder || 999))
+        .map((player) => \`
+          <div class="leader-item">\${player.eliminatedOrder}번째 탈락 · \${escapeHtml(player.nickname)}</div>
+        \`);
+
+      if (room.phase === 'result' && (room.result?.winnerNicknames || []).length) {
+        items.unshift(\`<div class="leader-item" style="border-color:rgba(34,197,94,0.4);color:#dcfce7;">우승 · \${escapeHtml(room.result.winnerNicknames.join(', '))}</div>\`);
+      }
+
+      $('leaderboard').innerHTML = items.length
+        ? items.join('')
+        : '<div class="small">아직 탈락자가 없습니다.</div>';
     }
 
     function renderState(data) {
