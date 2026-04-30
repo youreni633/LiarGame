@@ -1,8 +1,9 @@
-import { serve } from "@hono/node-server";
+import { createAdaptorServer } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { Server as SocketIOServer } from "socket.io";
 import {
   APP_VERSION,
   VOTE_TIME_LIMIT_SECONDS,
@@ -26,6 +27,10 @@ import {
   getSpyfallHTML,
   registerSpyfallRoutes,
 } from "./Spyfall/index.js";
+import {
+  registerCatchMindRoutes,
+  registerCatchMindSocket,
+} from "./CatchMind/index.js";
 import type {
   ChatMessage,
   GameMode,
@@ -1411,6 +1416,7 @@ registerDeathNoteRoutes(app);
 registerYangSeChanRoutes(app);
 registerForbiddenWordRoutes(app);
 registerSpyfallRoutes(app);
+registerCatchMindRoutes(app);
 
 // Static assets for Azure App Service / Node.js runtime
 const publicRoot = fileURLToPath(new URL("../public", import.meta.url));
@@ -3569,6 +3575,7 @@ input::placeholder { color: var(--slate-400); }
         <a class="logo-link-btn" href="/yangsechan"><i class="fas fa-comments"></i> 양세찬 게임</a>
         <a class="logo-link-btn" href="/forbidden-word"><i class="fas fa-ban"></i> 금지어 게임</a>
         <a class="logo-link-btn" href="/spyfall"><i class="fas fa-user-secret"></i> 스파이폴</a>
+        <a class="logo-link-btn" href="/catchmind"><i class="fas fa-paint-brush"></i> 캐치마인드</a>
       </div>
     </div>
 
@@ -4940,9 +4947,18 @@ setInterval(loadRooms, 5000);
 export default app;
 
 const port = Number(process.env.PORT) || 3000;
-serve({
+const server = createAdaptorServer({
   fetch: app.fetch,
-  port,
+});
+const io = new SocketIOServer(server, {
+  cors: {
+    origin: true,
+    credentials: true,
+  },
 });
 
-console.log(`LiarGame server is running on port ${port}`);
+registerCatchMindSocket(io);
+
+server.listen(port, () => {
+  console.log(`LiarGame server is running on port ${port}`);
+});

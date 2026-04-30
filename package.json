@@ -7,17 +7,21 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/copy-catchmind-assets.mjs",
     "start": "node dist/index.js",
-    "dev": "tsx watch src/index.ts"
+    "dev": "tsx watch src/index.ts",
+    "generate:catchmind-words": "node scripts/generate-catchmind-words.mjs",
+    "test:catchmind": "node scripts/test-catchmind.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
-    "hono": "^4.6.10"
+    "hono": "^4.6.10",
+    "socket.io": "^4.8.3"
   },
   "devDependencies": {
+    "@types/node": "^22.10.1",
+    "socket.io-client": "^4.8.3",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2",
-    "@types/node": "^22.10.1"
+    "typescript": "^5.7.2"
   }
 }
