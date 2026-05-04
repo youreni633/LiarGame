@@ -1,5 +1,7 @@
 # LiarGame Azure Server
 
+*캐치마인드추가
+
 ## Overview
 - Project: browser-based liar game server for Azure Web App
 - Stack: Hono + TypeScript + Node.js
