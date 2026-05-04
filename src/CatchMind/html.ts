@@ -3,7 +3,7 @@ export function getCatchMindHTML() {
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>캐치마인드</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -116,10 +116,7 @@ export function getCatchMindHTML() {
       outline: none;
     }
 
-    textarea {
-      min-height: 88px;
-      resize: vertical;
-    }
+
 
     input:focus, select:focus, textarea:focus {
       border-color: rgba(6, 182, 212, 0.7);
@@ -135,6 +132,7 @@ export function getCatchMindHTML() {
       color: white;
       font-weight: 700;
       transition: transform 0.15s ease, opacity 0.15s ease;
+      touch-action: manipulation;
     }
 
     button.secondary {
@@ -173,6 +171,7 @@ export function getCatchMindHTML() {
       padding: 16px;
       background: var(--panel-soft);
       cursor: pointer;
+      touch-action: manipulation;
       transition: border-color 0.2s ease, transform 0.2s ease;
     }
 
@@ -462,6 +461,7 @@ export function getCatchMindHTML() {
 
     .canvas-shell.readonly canvas {
       cursor: default;
+      touch-action: auto;
     }
 
     .canvas-overlay {
@@ -589,7 +589,7 @@ export function getCatchMindHTML() {
     .toast-stack {
       position: fixed;
       right: 16px;
-      bottom: 16px;
+      bottom: max(16px, env(safe-area-inset-bottom));
       display: grid;
       gap: 10px;
       z-index: 30;
@@ -636,12 +636,17 @@ export function getCatchMindHTML() {
       }
       .topbar-actions { width: 100%; }
       .topbar-actions button { flex: 1; }
-      .chat-row,
       .row {
         grid-template-columns: 1fr;
       }
+      .room-list {
+        max-height: 40vh;
+      }
       .hero-row {
         flex-direction: column;
+      }
+      .game-body {
+        padding-bottom: env(safe-area-inset-bottom);
       }
     }
   </style>
@@ -655,14 +660,15 @@ export function getCatchMindHTML() {
           <h1>캐치마인드</h1>
           <p>한 명은 그림으로 제시어를 설명하고, 나머지는 채팅으로 정답을 맞히는 실시간 드로잉 게임입니다. 출제자만 그릴 수 있고, 정답을 먼저 맞히면 즉시 다음 턴으로 넘어갑니다.</p>
         </div>
+        <form id="create-room-form">
         <div class="stack" style="margin-top:18px;">
           <div>
             <label class="label">닉네임</label>
-            <input id="nickname-input" maxlength="10" placeholder="닉네임을 입력해 주세요" />
+            <input id="nickname-input" maxlength="10" placeholder="닉네임을 입력해 주세요" enterkeyhint="next" autocomplete="nickname" />
           </div>
           <div>
             <label class="label">방 이름</label>
-            <input id="room-name-input" maxlength="24" placeholder="방 이름(선택)" />
+            <input id="room-name-input" maxlength="24" placeholder="방 이름(선택)" enterkeyhint="go" autocomplete="off" />
           </div>
           <div class="row">
             <div>
@@ -693,8 +699,9 @@ export function getCatchMindHTML() {
               <option value="150">150초</option>
             </select>
           </div>
-          <button id="create-room-btn">캐치마인드 방 만들기</button>
+          <button id="create-room-btn" type="submit">캐치마인드 방 만들기</button>
         </div>
+        </form>
       </section>
       <section class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:12px;">
@@ -781,7 +788,7 @@ export function getCatchMindHTML() {
           <div id="chat-messages" class="messages"></div>
           <form id="chat-form">
             <div class="chat-row">
-              <textarea id="chat-input" placeholder="메시지를 입력해 주세요. 정답도 이곳에 입력합니다."></textarea>
+              <input id="chat-input" type="text" placeholder="메시지 입력 (정답도 이곳에)" enterkeyhint="send" autocomplete="off" />
               <button type="submit">전송</button>
             </div>
           </form>
@@ -1017,11 +1024,13 @@ export function getCatchMindHTML() {
     }
 
     async function createRoom() {
+      const nickname = els.nicknameInput.value.trim();
+      if (!nickname) {
+        els.nicknameInput.focus();
+        showToast("닉네임을 먼저 입력해 주세요.", "error");
+        return;
+      }
       try {
-        const nickname = els.nicknameInput.value.trim();
-        if (!nickname) {
-          throw new Error("닉네임을 입력해 주세요.");
-        }
         state.nickname = nickname;
         saveSession();
         const data = await api("/api/catchmind/rooms", {
@@ -1048,11 +1057,14 @@ export function getCatchMindHTML() {
       if (!roomId) {
         return;
       }
+      const nickname = els.nicknameInput.value.trim();
+      if (!nickname) {
+        els.nicknameInput.focus();
+        els.nicknameInput.scrollIntoView({ behavior: "smooth", block: "center" });
+        showToast("닉네임을 먼저 입력해 주세요.", "error");
+        return;
+      }
       try {
-        const nickname = els.nicknameInput.value.trim();
-        if (!nickname) {
-          throw new Error("닉네임을 입력해 주세요.");
-        }
         state.nickname = nickname;
         saveSession();
         const data = await api("/api/catchmind/rooms/" + roomId + "/join", {
@@ -1754,7 +1766,10 @@ export function getCatchMindHTML() {
     }
 
     els.nicknameInput.value = state.nickname;
-    els.createRoomBtn.addEventListener("click", createRoom);
+    document.getElementById("create-room-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      createRoom();
+    });
     els.refreshBtn.addEventListener("click", loadRooms);
     els.readyBtn.addEventListener("click", toggleReady);
     els.startBtn.addEventListener("click", startGame);
