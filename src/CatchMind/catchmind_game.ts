@@ -140,6 +140,69 @@ function getVisibleWordMask(word: string) {
   return `${masked} (${visibleLength}글자)`;
 }
 
+function getChoseongHint(word: string) {
+  const choseong = [
+    "ㄱ",
+    "ㄲ",
+    "ㄴ",
+    "ㄷ",
+    "ㄸ",
+    "ㄹ",
+    "ㅁ",
+    "ㅂ",
+    "ㅃ",
+    "ㅅ",
+    "ㅆ",
+    "ㅇ",
+    "ㅈ",
+    "ㅉ",
+    "ㅊ",
+    "ㅋ",
+    "ㅌ",
+    "ㅍ",
+    "ㅎ",
+  ];
+
+  return Array.from(word)
+    .map((char) => {
+      if (char === " ") {
+        return " ";
+      }
+
+      const code = char.charCodeAt(0);
+      if (code >= 0xac00 && code <= 0xd7a3) {
+        return choseong[Math.floor((code - 0xac00) / 588)] || char;
+      }
+
+      return char.toUpperCase();
+    })
+    .join("");
+}
+
+function shouldRevealHint(room: CatchMindRoom) {
+  return (
+    room.phase === "turn" &&
+    !!room.turnEndsAt &&
+    room.turnEndsAt - now() <= 10_000
+  );
+}
+
+function getDisplayWordForPlayer(room: CatchMindRoom, isDrawer: boolean) {
+  if (room.phase !== "turn") {
+    return room.currentWord || "";
+  }
+
+  if (isDrawer) {
+    return room.currentWord;
+  }
+
+  if (!shouldRevealHint(room)) {
+    return room.currentWordMask;
+  }
+
+  return `${room.currentWordMask} · 초성: ${getChoseongHint(room.currentWord)}`;
+}
+
 function bumpRoom(room: CatchMindRoom) {
   room.updatedAt = now();
   room.version += 1;
@@ -202,12 +265,7 @@ function buildState(
   const player = getPlayer(room, playerId);
   const drawer = getDrawer(room);
   const isDrawer = !!player && room.currentDrawerId === player.id;
-  const displayWord =
-    room.phase === "turn"
-      ? isDrawer
-        ? room.currentWord
-        : room.currentWordMask
-      : room.currentWord || "";
+  const displayWord = getDisplayWordForPlayer(room, isDrawer);
 
   return {
     changed: true,
@@ -489,6 +547,22 @@ function startNextTurn(room: CatchMindRoom) {
   );
   emitCanvasClear(room);
   emitRoomState(room, true);
+
+  const hintDelayMs = Math.max(0, room.turnDurationSeconds * 1000 - 10_000);
+  schedule(room, () => {
+    const activeRoom = catchMindRooms.get(room.id);
+    if (!activeRoom || activeRoom.phase !== "turn") {
+      return;
+    }
+
+    activeRoom.statusText = `10초 남았습니다! 초성 힌트: ${getChoseongHint(activeRoom.currentWord)}`;
+    bumpRoom(activeRoom);
+    pushSystemMessage(
+      activeRoom,
+      `힌트 공개! 초성은 ${getChoseongHint(activeRoom.currentWord)} 입니다.`,
+    );
+    emitRoomState(activeRoom);
+  }, hintDelayMs);
 
   schedule(room, () => {
     const activeRoom = catchMindRooms.get(room.id);
