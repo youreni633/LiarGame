@@ -1267,10 +1267,15 @@ export function getCatchMindHTML() {
       }
       state.resultEntries = data.resultEntries || [];
       state.canvasTurnKey = makeTurnKey(state.room);
+      const turnChanged = state.canvasTurnKey !== previousTurnKey;
+
+      if (turnChanged && !hasCanvasSnapshot) {
+        state.drawEvents = [];
+      }
 
       renderAll();
 
-      if (state.canvasTurnKey !== previousTurnKey || hasCanvasSnapshot) {
+      if (turnChanged || hasCanvasSnapshot) {
         replayCanvas();
       }
 

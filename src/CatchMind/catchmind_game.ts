@@ -488,7 +488,7 @@ function startNextTurn(room: CatchMindRoom) {
     }님의 차례입니다.`,
   );
   emitCanvasClear(room);
-  emitRoomState(room);
+  emitRoomState(room, true);
 
   schedule(room, () => {
     const activeRoom = catchMindRooms.get(room.id);
