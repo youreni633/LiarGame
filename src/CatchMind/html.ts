@@ -1715,7 +1715,8 @@ export function getCatchMindHTML() {
     }
 
     function stopStroke(event) {
-      if (event && event.cancelable) {
+      const shouldBlockDefault = state.isDrawing && canDraw();
+      if (event && event.cancelable && shouldBlockDefault) {
         event.preventDefault();
       }
       if (state.isDrawing && state.lastPoint && !state.strokeMoved && canDraw()) {
