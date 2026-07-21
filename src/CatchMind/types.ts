@@ -5,6 +5,7 @@ export type CatchMindDrawTool = "pen" | "eraser";
 export type CatchMindDrawEvent = {
   id: string;
   type: "line" | "clear";
+  turnKey?: string;
   x0?: number;
   y0?: number;
   x1?: number;

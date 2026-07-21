@@ -121,6 +121,10 @@ function getCurrentRound(room: CatchMindRoom) {
   return getCurrentTurnEntry(room)?.round || 0;
 }
 
+function getTurnKey(room: CatchMindRoom) {
+  return [room.phase, getCurrentRound(room), room.turnIndex + 1, room.currentDrawerId || ""].join(":");
+}
+
 function getTotalTurns(room: CatchMindRoom) {
   return room.turnQueue.length;
 }
@@ -335,6 +339,7 @@ function emitCanvasClear(room: CatchMindRoom) {
     roomId: room.id,
     background: CM_CANVAS_BACKGROUND,
     drawVersion: room.drawVersion,
+    turnKey: getTurnKey(room),
   });
 }
 
@@ -927,9 +932,13 @@ export function registerCatchMindSocket(io: Server) {
       const size = clamp(Number(payload?.size) || 4, 1, 32);
       const color = String(payload?.color || "#111827");
       const tool = payload?.tool === "eraser" ? "eraser" : "pen";
+      const turnKey = String(payload?.turnKey || "");
 
       const coordinates = [x0, y0, x1, y1];
       if (coordinates.some((value) => Number.isNaN(value) || value < 0 || value > 1)) {
+        return;
+      }
+      if (turnKey && turnKey !== getTurnKey(room)) {
         return;
       }
 
@@ -938,6 +947,7 @@ export function registerCatchMindSocket(io: Server) {
       const event: CatchMindDrawEvent = {
         id: generateId(),
         type: "line",
+        turnKey: getTurnKey(room),
         x0,
         y0,
         x1,
@@ -971,6 +981,7 @@ export function registerCatchMindSocket(io: Server) {
       const room = getRoom(roomId);
       const player = room ? getPlayer(room, playerId) : null;
       const text = String(payload?.text || "").trim();
+      const guessOnly = payload?.guessOnly === true;
       if (!room || !player) {
         emitSocketError(socket, "채팅을 전송할 수 없습니다.");
         return;
@@ -983,6 +994,14 @@ export function registerCatchMindSocket(io: Server) {
 
       if (room.phase === "turn" && room.currentDrawerId !== playerId && text === room.currentWord) {
         handleCorrectGuess(room, player);
+        return;
+      }
+
+      if (guessOnly) {
+        socket.emit("catchmind:guess-feedback", {
+          correct: false,
+          text,
+        });
         return;
       }
 

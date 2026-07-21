@@ -510,6 +510,26 @@ export function getCatchMindHTML() {
       gap: 10px;
     }
 
+    .guess-box {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid rgba(148, 163, 184, 0.12);
+    }
+
+    .guess-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+    }
+
+    .guess-note {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
     .players {
       display: grid;
       gap: 10px;
@@ -636,7 +656,8 @@ export function getCatchMindHTML() {
       }
       .topbar-actions { width: 100%; }
       .topbar-actions button { flex: 1; }
-      .row {
+      .row,
+      .guess-row {
         grid-template-columns: 1fr;
       }
       .room-list {
@@ -774,6 +795,13 @@ export function getCatchMindHTML() {
             <canvas id="draw-canvas"></canvas>
             <div id="canvas-overlay" class="canvas-overlay"></div>
           </div>
+          <form id="guess-form" class="guess-box">
+            <div id="guess-note" class="guess-note">그림을 보면서 바로 정답을 입력할 수 있습니다.</div>
+            <div class="guess-row">
+              <input id="guess-input" type="text" placeholder="정답을 입력해 주세요" enterkeyhint="send" autocomplete="off" />
+              <button id="guess-submit-btn" type="submit">정답 제출</button>
+            </div>
+          </form>
         </div>
 
         <div id="result-panel" class="result-card"></div>
@@ -874,6 +902,10 @@ export function getCatchMindHTML() {
       chatMessages: document.getElementById("chat-messages"),
       chatForm: document.getElementById("chat-form"),
       chatInput: document.getElementById("chat-input"),
+      guessForm: document.getElementById("guess-form"),
+      guessInput: document.getElementById("guess-input"),
+      guessNote: document.getElementById("guess-note"),
+      guessSubmitBtn: document.getElementById("guess-submit-btn"),
       playerSummary: document.getElementById("player-summary"),
       playerList: document.getElementById("player-list"),
       resultPanel: document.getElementById("result-panel"),
@@ -1177,15 +1209,27 @@ export function getCatchMindHTML() {
       });
 
       state.socket.on("catchmind:draw-line", (payload) => {
+        if (payload && payload.turnKey && payload.turnKey !== state.canvasTurnKey) {
+          return;
+        }
         state.drawEvents.push(payload);
         state.drawVersion += 1;
         drawEvent(payload);
       });
 
       state.socket.on("catchmind:canvas-clear", (payload) => {
+        if (payload && payload.turnKey) {
+          state.canvasTurnKey = String(payload.turnKey);
+        }
         state.drawEvents = [];
         state.drawVersion = Number(payload && payload.drawVersion) || (state.drawVersion + 1);
         replayCanvas();
+      });
+
+      state.socket.on("catchmind:guess-feedback", (payload) => {
+        if (payload && payload.correct === false) {
+          showToast("아직 정답이 아닙니다.");
+        }
       });
 
       state.socket.on("catchmind:error", (payload) => {
@@ -1305,6 +1349,7 @@ export function getCatchMindHTML() {
       renderLobbyPanel();
       renderBoardState();
       renderToolbarState();
+      renderGuessForm();
       renderPlayers();
       renderMessages();
       renderResult();
@@ -1453,6 +1498,43 @@ export function getCatchMindHTML() {
       els.colorButtons.forEach((button) => {
         button.classList.toggle("active", button.getAttribute("data-color") === state.color && state.tool === "pen");
       });
+    }
+
+    function renderGuessForm() {
+      const room = state.room;
+      const me = state.myState;
+      const canGuess = !!room && room.phase === "turn" && !!me && !me.isDrawer;
+
+      els.guessForm.style.display = room ? "" : "none";
+      els.guessInput.disabled = !canGuess;
+      els.guessSubmitBtn.disabled = !canGuess;
+
+      if (!room) {
+        els.guessNote.textContent = "방 정보를 불러오는 중입니다.";
+        return;
+      }
+
+      if (room.phase === "lobby") {
+        els.guessNote.textContent = "게임이 시작되면 이곳에서 바로 정답을 제출할 수 있습니다.";
+        return;
+      }
+
+      if (room.phase === "turn" && me && me.isDrawer) {
+        els.guessNote.textContent = "출제자는 정답 제출 필드를 사용할 수 없습니다.";
+        return;
+      }
+
+      if (room.phase === "turn") {
+        els.guessNote.textContent = "채팅 탭으로 이동하지 않고 여기서 바로 정답을 제출할 수 있습니다.";
+        return;
+      }
+
+      if (room.phase === "turn_result") {
+        els.guessNote.textContent = "이번 턴 결과를 확인하는 중입니다.";
+        return;
+      }
+
+      els.guessNote.textContent = "최종 결과를 집계하는 중입니다.";
     }
 
     function renderPlayers() {
@@ -1672,6 +1754,7 @@ export function getCatchMindHTML() {
         color: state.color,
         size: state.brushSize,
         tool: state.tool,
+        turnKey: state.canvasTurnKey,
       };
 
       const localEvent = {
@@ -1771,6 +1854,20 @@ export function getCatchMindHTML() {
       els.chatInput.value = "";
     }
 
+    async function submitGuess() {
+      const text = els.guessInput.value.trim();
+      if (!text || !state.socket || !state.room || !state.myState || state.myState.isDrawer || state.room.phase !== "turn") {
+        return;
+      }
+      state.socket.emit("catchmind:chat", {
+        roomId: state.roomId,
+        playerId: state.playerId,
+        text,
+        guessOnly: true,
+      });
+      els.guessInput.value = "";
+    }
+
     els.nicknameInput.value = state.nickname;
     document.getElementById("create-room-form").addEventListener("submit", (event) => {
       event.preventDefault();
@@ -1788,6 +1885,10 @@ export function getCatchMindHTML() {
     els.chatForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       await sendChat();
+    });
+    els.guessForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      await submitGuess();
     });
     els.mobileTabs.forEach((button) => {
       button.addEventListener("click", () => setMobileTab(button.getAttribute("data-tab")));
