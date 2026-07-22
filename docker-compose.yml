@@ -1,0 +1,28 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: threemok
+      POSTGRES_USER: threemok
+      POSTGRES_PASSWORD: threemok-local
+    ports: ["5433:5432"]
+    volumes: ["threemok-postgres:/var/lib/postgresql/data"]
+  server:
+    build:
+      context: .
+      dockerfile: apps/three-level-omok/server/Dockerfile
+    environment:
+      NODE_ENV: development
+      PORT: 3100
+      DATABASE_URL: postgresql://threemok:threemok-local@postgres:5432/threemok
+      ENABLE_DEV_AUTH: "true"
+    depends_on: [postgres]
+    ports: ["3100:3100"]
+  web:
+    build:
+      context: .
+      dockerfile: apps/three-level-omok/web/Dockerfile
+    depends_on: [server]
+    ports: ["8080:8080"]
+volumes:
+  threemok-postgres:

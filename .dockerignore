@@ -1,0 +1,6 @@
+node_modules
+dist
+.git
+.azure
+apps/three-level-omok/web/dist
+*.log

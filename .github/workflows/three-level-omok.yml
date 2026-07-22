@@ -1,0 +1,77 @@
+name: three-level-omok
+
+on:
+  push:
+    paths:
+      - "apps/three-level-omok/**"
+      - "packages/game-engine/**"
+      - "packages/contracts/**"
+      - "packages/db/**"
+      - "pnpm-workspace.yaml"
+      - "pnpm-lock.yaml"
+  pull_request:
+    paths:
+      - "apps/three-level-omok/**"
+      - "packages/game-engine/**"
+      - "packages/contracts/**"
+      - "packages/db/**"
+      - "pnpm-workspace.yaml"
+      - "pnpm-lock.yaml"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @three-level-omok/game-engine build
+      - run: pnpm --filter @three-level-omok/game-engine test
+      - run: pnpm --filter @three-level-omok/contracts build
+      - run: pnpm --filter @three-level-omok/db build
+      - run: pnpm --filter @three-level-omok/server build
+      - run: pnpm --filter @three-level-omok/web build
+      - name: Prepare Azure App Service package
+        run: |
+          rm -rf release
+          pnpm --filter @three-level-omok/server deploy --prod release
+          mkdir -p release/web-dist
+          cp -R apps/three-level-omok/web/dist/. release/web-dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: three-mok-app
+          path: release
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: three-mok-app
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_8CA89B81F8DA4001BF46CD510FB20B92 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_27781E4EBACF4DC4A8713A03F71FC847 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_AC299DC1B6EF49B9BE304C989889A7B7 }}
+      - name: Configure App Service startup
+        run: |
+          az webapp config set --resource-group YoureniGames --name YoureniThreeMok --startup-file "node dist/server.js"
+          az webapp config appsettings set --resource-group YoureniGames --name YoureniThreeMok --settings SCM_DO_BUILD_DURING_DEPLOYMENT=false THREE_MOK_WEB_DIST=web-dist
+      - name: Deploy three-level-omok to Azure Web App
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: YoureniThreeMok
+          slot-name: Production
+          package: .

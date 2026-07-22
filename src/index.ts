@@ -3571,6 +3571,7 @@ input::placeholder { color: var(--slate-400); }
       <div class="logo-title">시멈비 라이어게임</div>
       <div class="logo-subtitle">거짓말쟁이를 찾아라! 최대 10명과 함께하는 실시간 추리 게임</div>
       <div class="logo-links">
+        <a class="logo-link-btn" href="${process.env.THREE_MOK_PUBLIC_URL || "http://localhost:8080/threemok/"}"><i class="fas fa-layer-group"></i> 삼단오목</a>
         <a class="logo-link-btn" href="/deathnote"><i class="fas fa-book-dead"></i> 데스노트 게임</a>
         <a class="logo-link-btn" href="/yangsechan"><i class="fas fa-comments"></i> 양세찬 게임</a>
         <a class="logo-link-btn" href="/forbidden-word"><i class="fas fa-ban"></i> 금지어 게임</a>
