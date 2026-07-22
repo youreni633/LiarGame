@@ -62,9 +62,9 @@ jobs:
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_8CA89B81F8DA4001BF46CD510FB20B92 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_27781E4EBACF4DC4A8713A03F71FC847 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_AC299DC1B6EF49B9BE304C989889A7B7 }}
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_069039E17B9B4F7FBC88CA3F4132DB3A }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_D3061F767F3E4F60A44A7467392B1890 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_1E500166E11F455AAA5DE6B0D64E0C75 }}
       - name: Configure App Service startup
         run: |
           az webapp config set --resource-group YoureniGames --name YoureniThreeMok --startup-file "node dist/server.js"
